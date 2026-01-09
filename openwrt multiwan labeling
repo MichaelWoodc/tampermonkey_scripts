@@ -1,0 +1,145 @@
+// ==UserScript==
+// @name         OpenWrt LuCI MWAN + Port Labels (Corrected lan4)
+// @namespace    http://192.168.1.1/
+// @version      7.1
+// @match        http://192.168.1.1/cgi-bin/luci/*
+// @run-at       document-end
+// @grant        none
+// ==/UserScript==
+
+(function () {
+    'use strict';
+
+    /* =======================
+       MWAN PROVIDERS
+       ======================= */
+    const MWAN_PROVIDERS = {
+        wan:   'Live Oak Fiber',
+        wan6:  'Live Oak Fiber',
+        wanb:  'XFinity',
+        wanb6: 'XFinity'
+    };
+
+    function addMwanProviders(container) {
+        container.querySelectorAll('.alert-message').forEach(card => {
+            if (card.dataset.providerAdded === '1') return;
+
+            const ifaceDiv = Array.from(card.children).find(div => {
+                const strong = div.querySelector('strong');
+                return strong && strong.textContent === 'Interface: ';
+            });
+
+            if (!ifaceDiv) return;
+
+            const ifaceNode = ifaceDiv.querySelector('strong').nextSibling;
+            if (!ifaceNode || ifaceNode.nodeType !== Node.TEXT_NODE) return;
+
+            const ifaceName = ifaceNode.nodeValue.trim();
+            const provider = MWAN_PROVIDERS[ifaceName];
+            if (!provider) return;
+
+            const providerDiv = document.createElement('div');
+            providerDiv.innerHTML =
+                `<strong>Provider: </strong><strong>${provider}</strong>`;
+
+            card.insertBefore(providerDiv, card.firstChild);
+            card.dataset.providerAdded = '1';
+        });
+    }
+
+    /* =======================
+       PORT STATUS HANDLING
+       ======================= */
+    const PORT_PROVIDERS = {
+        wan0: 'Live Oak Fiber',
+        wan1: 'XFinity'
+    };
+
+    function updateAndReorderPorts(root = document) {
+        const boxes = Array.from(root.querySelectorAll('.ifacebox'));
+        if (!boxes.length) return;
+
+        let wan0Box = null;
+        let wan1Box = null;
+
+        boxes.forEach(box => {
+            const head = box.querySelector('.ifacebox-head');
+            if (!head) return;
+
+            const name = head.childNodes[0]?.textContent?.trim();
+            if (!name) return;
+
+            // Prevent duplicate processing
+            if (box.dataset.portProcessed === '1') {
+                if (name === 'wan0') wan0Box = box;
+                if (name === 'wan1') wan1Box = box;
+                return;
+            }
+
+            // lan4 → wan1
+            if (name === 'lan4') {
+                head.childNodes[0].textContent = 'wan1';
+                addProviderSubtitle(head, PORT_PROVIDERS.wan1);
+                box.dataset.portProcessed = '1';
+                wan1Box = box;
+                return;
+            }
+
+            // wan → wan0
+            if (name === 'wan') {
+                head.childNodes[0].textContent = 'wan0';
+                addProviderSubtitle(head, PORT_PROVIDERS.wan0);
+                box.dataset.portProcessed = '1';
+                wan0Box = box;
+                return;
+            }
+        });
+
+        // Reorder: wan0 first, then wan1
+        const parent = boxes[0].parentElement;
+        if (!parent) return;
+
+        if (wan0Box) parent.prepend(wan0Box);
+        if (wan1Box && wan1Box !== wan0Box.nextSibling) {
+            parent.insertBefore(wan1Box, wan0Box ? wan0Box.nextSibling : parent.firstChild);
+        }
+    }
+
+    function addProviderSubtitle(head, text) {
+        if (head.querySelector('.provider-sub')) return;
+
+        const sub = document.createElement('div');
+        sub.className = 'provider-sub';
+        sub.textContent = text;
+        sub.style.fontSize = '80%';
+        sub.style.fontWeight = 'bold';
+        sub.style.marginTop = '2px';
+
+        head.appendChild(sub);
+    }
+
+    /* =======================
+       OBSERVER
+       ======================= */
+    const observer = new MutationObserver(mutations => {
+        for (const m of mutations) {
+            for (const node of m.addedNodes) {
+                if (node.nodeType !== 1) continue;
+
+                if (node.id === 'mwan3-service-status') {
+                    addMwanProviders(node);
+                }
+
+                if (node.querySelector?.('.ifacebox')) {
+                    updateAndReorderPorts(node);
+                }
+            }
+        }
+    });
+
+    observer.observe(document.body, {
+        childList: true,
+        subtree: true
+    });
+
+})();
