@@ -1,22 +1,21 @@
 // ==UserScript==
-// @name         Navidrome Lyric Accessibility Booster (v6 - Percent Width + Safe Drag)
+// @name         Navidrome Lyric Accessibility Booster
 // @namespace    http://tampermonkey.net/
-// @version      6.0
-// @description  Bottom-centered lyrics, percent width, safe dragging, draggable/minimizable panel, forced lyrics
-// @match        https://yourdomain.com/*
+// @version      2
+// @description  Bottom-centered lyrics, viewport-based wrap width, tight drag hitbox, draggable/minimizable panel, forced lyrics, no clipping, force-center toggle
+// @match        https://navidrome.michaelwoodcock.duckdns.org/*
 // @grant        none
 // ==/UserScript==
-
-// --- CREATE CONTROL PANEL ---
 
 (function() {
     'use strict';
 
     let settings = {
         fontSize: 32,
-        wrapWidth: 80,          // percent width
+        wrapWidth: 90,          // percent of viewport width (vw)
         textColor: "#ff0000",
-        bgColor: "transparent"
+        bgColor: "transparent",
+        forceCenter: true       // default ON
     };
 
     // --- CREATE CONTROL PANEL ---
@@ -30,7 +29,7 @@
         color: white;
         padding: 12px;
         border-radius: 8px;
-        width: 240px;
+        width: 260px;
         font-family: sans-serif;
         font-size: 14px;
         cursor: move;
@@ -43,12 +42,18 @@
         </div>
 
         <div id="panel-body" style="margin-top:10px;">
+
+            <label style="display:flex; align-items:center; gap:6px; margin-bottom:10px;">
+                <input id="force-center" type="checkbox" checked>
+                Force Center
+            </label>
+
             Font Size: <span id="fs-val">${settings.fontSize}px</span><br>
             <input id="fs" type="range" min="12" max="120" value="${settings.fontSize}" style="width:100%;">
 
             <br><br>
 
-            Wrap Width: <span id="ww-val">${settings.wrapWidth}%</span><br>
+            Wrap Width: <span id="ww-val">${settings.wrapWidth}% of screen</span><br>
             <input id="ww" type="range" min="20" max="100" value="${settings.wrapWidth}" style="width:100%;">
 
             <br><br>
@@ -69,7 +74,7 @@
     let isDraggingPanel = false, offsetX = 0, offsetY = 0;
 
     panel.addEventListener("mousedown", e => {
-        if (e.target.tagName === "INPUT" || e.target.tagName === "BUTTON") return;
+        if (["INPUT", "BUTTON"].includes(e.target.tagName) || e.target.type === "checkbox") return;
         isDraggingPanel = true;
         offsetX = e.clientX - panel.offsetLeft;
         offsetY = e.clientY - panel.offsetTop;
@@ -97,33 +102,54 @@
         const lyric = document.querySelector(".music-player-lyric.react-draggable");
         if (!lyric) return;
 
-        const currentTransform = lyric.style.transform;
+        // Create wrapper if missing
+        if (!lyric.querySelector(".inner-lyric-text")) {
+            const inner = document.createElement("div");
+            inner.className = "inner-lyric-text";
 
-        // Accessibility styling
-        lyric.style.fontSize = settings.fontSize + "px";
-        lyric.style.display = "inline-block";     // shrink hitbox to text
-        lyric.style.width = "auto";
-        lyric.style.maxWidth = settings.wrapWidth + "%";
-        lyric.style.color = settings.textColor;
-        lyric.style.background = settings.bgColor;
-        lyric.style.padding = "10px";
-        lyric.style.borderRadius = "6px";
+            while (lyric.firstChild) {
+                inner.appendChild(lyric.firstChild);
+            }
+
+            lyric.appendChild(inner);
+        }
+
+        const inner = lyric.querySelector(".inner-lyric-text");
+
+        // OUTER BOX (full wrap width)
+        lyric.style.position = "fixed";
+        lyric.style.boxSizing = "border-box";
+        lyric.style.width = settings.wrapWidth + "vw";
+        lyric.style.maxWidth = settings.wrapWidth + "vw";
         lyric.style.whiteSpace = "normal";
-        lyric.style.lineHeight = "1.4";
-        lyric.style.textAlign = "center";
+        lyric.style.overflow = "visible";
+        lyric.style.height = "auto";
 
-        // Detect if user dragged it
-        const userMoved = currentTransform && currentTransform !== "translate(0px, 0px)";
+        // ⭐ CRITICAL: Outer box should NOT receive clicks
+        lyric.style.pointerEvents = "none";
 
-        if (!userMoved) {
-            // Default: bottom center like subtitles
-            lyric.style.position = "fixed";
+        // INNER BOX (tight to text)
+        inner.style.display = "inline-block";
+        inner.style.width = "auto";
+        inner.style.maxWidth = "100%";
+        inner.style.whiteSpace = "normal";
+        inner.style.textAlign = "center";
+        inner.style.fontSize = settings.fontSize + "px";
+        inner.style.color = settings.textColor;
+        inner.style.background = settings.bgColor;
+        inner.style.padding = "10px";
+        inner.style.borderRadius = "6px";
+        inner.style.lineHeight = "1.4";
+
+        // ⭐ CRITICAL: Inner box receives clicks
+        inner.style.pointerEvents = "auto";
+
+        // FORCE CENTER
+        if (settings.forceCenter) {
             lyric.style.left = "50%";
+            lyric.style.transform = "translateX(-50%)";
             lyric.style.bottom = "20px";
             lyric.style.top = "auto";
-            lyric.style.transform = "translateX(-50%)";
-        } else {
-            lyric.style.transform = currentTransform;
         }
     }
 
@@ -136,17 +162,18 @@
         if (!isActive) btn.click();
     }
 
-    // --- SAFE DRAGGING FOR LYRICS ---
+    // --- SAFE DRAGGING FOR INNER TEXT ONLY ---
     let draggingLyrics = false;
     let dragOffsetX = 0;
     let dragOffsetY = 0;
 
     document.addEventListener("mousedown", e => {
+        const inner = document.querySelector(".inner-lyric-text");
         const lyric = document.querySelector(".music-player-lyric.react-draggable");
-        if (!lyric) return;
+        if (!inner || !lyric) return;
 
-        // Only drag when clicking the actual text
-        if (e.target === lyric || lyric.contains(e.target)) {
+        // Only drag when clicking the inner text
+        if (e.target === inner || inner.contains(e.target)) {
             draggingLyrics = true;
             dragOffsetX = e.clientX - lyric.offsetLeft;
             dragOffsetY = e.clientY - lyric.offsetTop;
@@ -159,7 +186,6 @@
         const lyric = document.querySelector(".music-player-lyric.react-draggable");
         if (!lyric) return;
 
-        lyric.style.position = "fixed";
         lyric.style.left = (e.clientX - dragOffsetX) + "px";
         lyric.style.top = (e.clientY - dragOffsetY) + "px";
         lyric.style.bottom = "auto";
@@ -179,6 +205,11 @@
     observer.observe(document.body, { childList: true, subtree: true });
 
     // --- EVENT HANDLERS ---
+    document.getElementById("force-center").addEventListener("change", e => {
+        settings.forceCenter = e.target.checked;
+        applyStyles();
+    });
+
     document.getElementById("fs").addEventListener("input", e => {
         settings.fontSize = e.target.value;
         document.getElementById("fs-val").textContent = settings.fontSize + "px";
@@ -187,7 +218,7 @@
 
     document.getElementById("ww").addEventListener("input", e => {
         settings.wrapWidth = e.target.value;
-        document.getElementById("ww-val").textContent = settings.wrapWidth + "%";
+        document.getElementById("ww-val").textContent = settings.wrapWidth + "% of screen";
         applyStyles();
     });
 
