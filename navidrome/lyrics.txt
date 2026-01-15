@@ -1,9 +1,9 @@
 // ==UserScript==
 // @name         Navidrome Lyric Accessibility Booster
 // @namespace    http://tampermonkey.net/
-// @version      2
-// @description  Bottom-centered lyrics, viewport-based wrap width, tight drag hitbox, draggable/minimizable panel, forced lyrics, no clipping, force-center toggle
-// @match        https://navidrome.michaelwoodcock.duckdns.org/*
+// @version      3.0
+// @description  Bottom-centered lyrics, viewport-based wrap width, tight drag hitbox, draggable/minimizable panel, forced lyrics, no clipping, force-center toggle, bottom margin variable
+// @match        https://your_navidrome.instance/*
 // @grant        none
 // ==/UserScript==
 
@@ -15,7 +15,8 @@
         wrapWidth: 90,          // percent of viewport width (vw)
         textColor: "#ff0000",
         bgColor: "transparent",
-        forceCenter: true       // default ON
+        forceCenter: true,      // default ON
+        bottomMargin: 20 
     };
 
     // --- CREATE CONTROL PANEL ---
@@ -125,7 +126,7 @@
         lyric.style.overflow = "visible";
         lyric.style.height = "auto";
 
-        // ⭐ CRITICAL: Outer box should NOT receive clicks
+        // Outer box should NOT receive clicks
         lyric.style.pointerEvents = "none";
 
         // INNER BOX (tight to text)
@@ -141,14 +142,14 @@
         inner.style.borderRadius = "6px";
         inner.style.lineHeight = "1.4";
 
-        // ⭐ CRITICAL: Inner box receives clicks
+        // Inner box receives clicks
         inner.style.pointerEvents = "auto";
 
-        // FORCE CENTER
+        // FORCE CENTER with bottom margin
         if (settings.forceCenter) {
             lyric.style.left = "50%";
             lyric.style.transform = "translateX(-50%)";
-            lyric.style.bottom = "20px";
+            lyric.style.bottom = (20 + settings.bottomMargin) + "px"; // 
             lyric.style.top = "auto";
         }
     }
@@ -172,7 +173,6 @@
         const lyric = document.querySelector(".music-player-lyric.react-draggable");
         if (!inner || !lyric) return;
 
-        // Only drag when clicking the inner text
         if (e.target === inner || inner.contains(e.target)) {
             draggingLyrics = true;
             dragOffsetX = e.clientX - lyric.offsetLeft;
