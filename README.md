@@ -8,3 +8,6 @@ Your OpenWrt Multiwan and interface labeling:
 <img width="965" height="238" alt="image" src="https://github.com/user-attachments/assets/5f71b19b-585f-4428-9127-3afb0f633ae6" />
 
 and (soon) more!
+
+Please note (warning!): 
+I put some misc projects on github merely for storage.  These projects and examples have not been extensively tested.  They may contain errors, and they may cause you problems.  You have been warned!  Use them at your own risk.
