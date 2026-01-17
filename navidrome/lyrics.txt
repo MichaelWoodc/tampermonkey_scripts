@@ -1,9 +1,9 @@
 // ==UserScript==
-// @name         Navidrome Lyric Accessibility Booster
+// @name         Navidrome Lyric Accessibility Booster (v13)
 // @namespace    http://tampermonkey.net/
-// @version      3.0
+// @version      13.0
 // @description  Bottom-centered lyrics, viewport-based wrap width, tight drag hitbox, draggable/minimizable panel, forced lyrics, no clipping, force-center toggle, bottom margin variable
-// @match        https://your_navidrome.instance/*
+// @match        https://navidrome.org/*
 // @grant        none
 // ==/UserScript==
 
@@ -12,11 +12,11 @@
 
     let settings = {
         fontSize: 32,
-        wrapWidth: 90,          // percent of viewport width (vw)
+        wrapWidth: 90,// percent of viewport width (vw)
         textColor: "#ff0000",
         bgColor: "transparent",
-        forceCenter: true,      // default ON
-        bottomMargin: 20 
+        forceCenter: true,// default ON
+        bottomMargin: 20//  NEW: extra margin above bottom
     };
 
     // --- CREATE CONTROL PANEL ---
@@ -126,7 +126,7 @@
         lyric.style.overflow = "visible";
         lyric.style.height = "auto";
 
-        // Outer box should NOT receive clicks
+        //  Outer box should NOT receive clicks
         lyric.style.pointerEvents = "none";
 
         // INNER BOX (tight to text)
@@ -142,14 +142,14 @@
         inner.style.borderRadius = "6px";
         inner.style.lineHeight = "1.4";
 
-        // Inner box receives clicks
+        //  Inner box receives clicks
         inner.style.pointerEvents = "auto";
 
-        // FORCE CENTER with bottom margin
+        //  FORCE CENTER with bottom margin
         if (settings.forceCenter) {
             lyric.style.left = "50%";
             lyric.style.transform = "translateX(-50%)";
-            lyric.style.bottom = (20 + settings.bottomMargin) + "px"; // 
+            lyric.style.bottom = (20 + settings.bottomMargin) + "px"; // ⭐ NEW
             lyric.style.top = "auto";
         }
     }
