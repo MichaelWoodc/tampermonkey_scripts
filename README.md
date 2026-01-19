@@ -7,6 +7,12 @@ Your OpenWrt Multiwan and interface labeling:
 (port status)
 <img width="965" height="238" alt="image" src="https://github.com/user-attachments/assets/5f71b19b-585f-4428-9127-3afb0f633ae6" />
 
+Clean up your D2L or Folio page(s) to only view active assignments.  Go from this:
+<img width="909" height="851" alt="image" src="https://github.com/user-attachments/assets/cc442be1-8229-4ab9-850c-865a836c7505" />
+
+to this:
+<img width="849" height="789" alt="image" src="https://github.com/user-attachments/assets/c6b85fc7-bcf4-425b-a7d5-e1c5ef024acd" />
+
 and (soon) more!
 
 Please note (warning!): 
