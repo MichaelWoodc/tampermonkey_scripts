@@ -1,0 +1,32 @@
+// ==UserScript==
+// @name         Folio Assignment Cleaner (Link-Based)
+// @namespace    http://tampermonkey.net/
+// @version      1.1
+// @description  Show only assignments that have clickable links (open assignments)
+// @match        https://*/d2l/*
+// @grant        none
+// ==/UserScript==
+
+(function() {
+    'use strict';
+
+    function cleanTable() {
+        const rows = document.querySelectorAll("tr");
+
+        rows.forEach(row => {
+            // Look for a clickable link inside the first <th>
+            const th = row.querySelector("th");
+            if (!th) return;
+
+            const hasLink = th.querySelector("a");
+
+            // If no link → hide the row
+            if (!hasLink) {
+                row.style.display = "none";
+            }
+        });
+    }
+
+    // Run after DOM loads
+    setTimeout(cleanTable, 500);
+})();
