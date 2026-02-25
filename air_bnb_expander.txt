@@ -1,0 +1,100 @@
+// ==UserScript==
+// @name         Airbnb Full Description Inline Expander (No Modal)
+// @namespace    http://tampermonkey.net/
+// @version      2.0
+// @description  Expands Airbnb description into the main page and removes modal scrollbars
+// @match        https://www.airbnb.com/*
+// @match        https://airbnb.com/*
+// @grant        none
+// ==/UserScript==
+
+(function() {
+    'use strict';
+
+    function waitFor(selector, callback) {
+        const observer = new MutationObserver(() => {
+            const el = document.querySelector(selector);
+            if (el) {
+                observer.disconnect();
+                callback(el);
+            }
+        });
+        observer.observe(document.body, { childList: true, subtree: true });
+    }
+
+    function clickShowMore() {
+        const btn = [...document.querySelectorAll("button")]
+            .find(b => b.innerText.trim().toLowerCase() === "show more");
+
+        if (!btn) {
+            console.log("Show more not found yet");
+            return;
+        }
+
+        console.log("Clicking Show more");
+        btn.click();
+
+        waitForFullModal();
+    }
+
+    function waitForFullModal() {
+        const modalSelector =
+            "div.cz692az.atm_c8_exct8b.atm_g3_1tcgj5g.atm_w4_1hnarqo.atm_gq_1itn57d.dir.dir-ltr";
+
+        waitFor(modalSelector, modalDiv => {
+            console.log("Full modal content loaded");
+
+            const fullHTML = modalDiv.innerHTML;
+
+            // Close the modal immediately
+            const closeBtn = document.querySelector("button[aria-label='Close']");
+            if (closeBtn) {
+                closeBtn.click();
+                console.log("Closed modal");
+            }
+
+            injectIntoMainPage(fullHTML);
+        });
+    }
+
+    function injectIntoMainPage(fullHTML) {
+        const truncatedSelector =
+            "div[data-section-id='DESCRIPTION_DEFAULT'] div[style*='-webkit-line-clamp']";
+
+        const truncatedDiv = document.querySelector(truncatedSelector);
+
+        if (!truncatedDiv) {
+            console.log("Could not find truncated div");
+            return;
+        }
+
+        // Replace content
+        truncatedDiv.innerHTML = fullHTML;
+
+        // Remove all truncation styles
+        truncatedDiv.style.display = "block";
+        truncatedDiv.style.webkitLineClamp = "unset";
+        truncatedDiv.style.maxHeight = "none";
+        truncatedDiv.style.overflow = "visible";
+        truncatedDiv.style.textOverflow = "unset";
+
+        // Expand all parent containers
+        let parent = truncatedDiv.parentElement;
+        while (parent && parent !== document.body) {
+            parent.style.overflow = "visible";
+            parent.style.maxHeight = "none";
+            parent.style.height = "auto";
+            parent = parent.parentElement;
+        }
+
+        // Ensure body scrolls normally
+        document.body.style.overflow = "auto";
+
+        console.log("Injected full description into main page");
+    }
+
+    window.addEventListener("load", () => {
+        setTimeout(clickShowMore, 1500);
+    });
+
+})();
