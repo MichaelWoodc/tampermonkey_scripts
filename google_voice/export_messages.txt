@@ -1,0 +1,122 @@
+// ==UserScript==
+// @name         Google Voice – Reliable Conversation Extractor (Popup + PDF)
+// @namespace    https://michael-tools
+// @version      2.0
+// @description  Extracts all rendered messages and opens them in a clean popup for printing/PDF
+// @match        https://voice.google.com/*
+// @grant        GM_addStyle
+// ==/UserScript==
+
+(function () {
+    'use strict';
+
+    // --- Add button ---
+    const btn = document.createElement("button");
+    btn.textContent = "Export Conversation";
+    btn.id = "gv-export-btn";
+    document.body.appendChild(btn);
+
+    GM_addStyle(`
+        #gv-export-btn {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 999999;
+            padding: 10px 14px;
+            background: #1a73e8;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+        }
+        #gv-export-btn:hover {
+            background: #1558b0;
+        }
+    `);
+
+    btn.onclick = () => {
+        // Select all message items
+        const items = document.querySelectorAll("gv-text-message-item");
+
+        if (!items.length) {
+            alert("No messages detected. Scroll through the conversation first so they render.");
+            return;
+        }
+
+        let transcript = "";
+
+        items.forEach(item => {
+            const bubble = item.querySelector(".subject-content-container");
+            const text = bubble ? bubble.innerText.trim() : "";
+
+            const timestampNode = item.querySelector(".cdk-visually-hidden");
+            const timestamp = timestampNode ? timestampNode.innerText.trim() : "";
+
+            const outgoing = item.classList.contains("outgoing");
+            const speaker = outgoing ? "You" : "Them";
+
+            transcript += `
+                <div class="msg ${outgoing ? "you" : "them"}">
+                    <div class="speaker">${speaker}</div>
+                    <div class="text">${text.replace(/\n/g, "<br>")}</div>
+                    <div class="timestamp">${timestamp}</div>
+                </div>
+            `;
+        });
+
+        // Open popup
+        const popup = window.open("", "_blank", "width=900,height=1000,scrollbars=yes");
+
+        popup.document.write(`
+            <html>
+            <head>
+                <title>Conversation Export</title>
+                <style>
+                    body {
+                        font-family: Arial, sans-serif;
+                        padding: 20px;
+                        background: #f5f5f5;
+                    }
+                    .msg {
+                        margin: 20px 0;
+                        padding: 15px 20px;
+                        border-radius: 10px;
+                        max-width: 80%;
+                        background: white;
+                        box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+                    }
+                    .you {
+                        margin-left: auto;
+                        background: #d0e7ff;
+                    }
+                    .them {
+                        margin-right: auto;
+                        background: #e8e8e8;
+                    }
+                    .speaker {
+                        font-weight: bold;
+                        margin-bottom: 5px;
+                    }
+                    .timestamp {
+                        font-size: 0.8em;
+                        color: #666;
+                        margin-top: 8px;
+                    }
+                </style>
+            </head>
+            <body>
+                <h2>Conversation Export</h2>
+                ${transcript}
+                <script>
+                    // Auto-open print dialog after load
+                    setTimeout(() => { window.print(); }, 600);
+                </script>
+            </body>
+            </html>
+        `);
+
+        popup.document.close();
+    };
+})();
