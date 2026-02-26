@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         Google Voice – Reliable Conversation Extractor (Popup + PDF)
+// @name         Google Voice – Reliable Conversation Extractor (Images + Speaker Fix)
 // @namespace    https://michael-tools
-// @version      2.0
-// @description  Extracts all rendered messages and opens them in a clean popup for printing/PDF
+// @version      2.2
+// @description  Extracts messages + images and opens them in a clean popup for printing/PDF
 // @match        https://voice.google.com/*
 // @grant        GM_addStyle
 // ==/UserScript==
@@ -37,7 +37,6 @@
     `);
 
     btn.onclick = () => {
-        // Select all message items
         const items = document.querySelectorAll("gv-text-message-item");
 
         if (!items.length) {
@@ -48,25 +47,59 @@
         let transcript = "";
 
         items.forEach(item => {
-            const bubble = item.querySelector(".subject-content-container");
+
+            // --- Extract visible bubble text ONLY ---
+            const bubble = item.querySelector(".subject-content-container gv-annotation.content, .subject-content-container .content");
             const text = bubble ? bubble.innerText.trim() : "";
 
-            const timestampNode = item.querySelector(".cdk-visually-hidden");
-            const timestamp = timestampNode ? timestampNode.innerText.trim() : "";
+            // --- Extract images inside this message ---
+            let imagesHTML = "";
+            const imgs = item.querySelectorAll("img.image");
 
-            const outgoing = item.classList.contains("outgoing");
-            const speaker = outgoing ? "You" : "Them";
+            imgs.forEach(img => {
+                let src = img.getAttribute("src");
+
+                // Convert relative → absolute
+                if (src.startsWith("/")) {
+                    src = window.location.origin + src;
+                }
+
+                imagesHTML += `
+                    <div class="img-wrapper">
+                        <img src="${src}" style="max-width: 300px; margin-top: 10px; border-radius: 6px;">
+                    </div>
+                `;
+            });
+
+            // --- Extract timestamp + speaker from hidden block ---
+            const hidden = item.querySelector(".cdk-visually-hidden");
+            let timestamp = "";
+            let speaker = "Them";
+
+            if (hidden) {
+                const hiddenText = hidden.innerText;
+
+                // Speaker detection
+                if (/Message from you/i.test(hiddenText)) {
+                    speaker = "You";
+                }
+
+                // Timestamp extraction
+                const match = hiddenText.match(/\b(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday).*M\./);
+                if (match) timestamp = match[0];
+            }
 
             transcript += `
-                <div class="msg ${outgoing ? "you" : "them"}">
+                <div class="msg ${speaker === "You" ? "you" : "them"}">
                     <div class="speaker">${speaker}</div>
                     <div class="text">${text.replace(/\n/g, "<br>")}</div>
+                    ${imagesHTML}
                     <div class="timestamp">${timestamp}</div>
                 </div>
             `;
         });
 
-        // Open popup
+        // --- Open popup ---
         const popup = window.open("", "_blank", "width=900,height=1000,scrollbars=yes");
 
         popup.document.write(`
@@ -104,13 +137,16 @@
                         color: #666;
                         margin-top: 8px;
                     }
+                    img {
+                        display: block;
+                        margin-top: 10px;
+                    }
                 </style>
             </head>
             <body>
                 <h2>Conversation Export</h2>
                 ${transcript}
                 <script>
-                    // Auto-open print dialog after load
                     setTimeout(() => { window.print(); }, 600);
                 </script>
             </body>
