@@ -1,0 +1,324 @@
+// ==UserScript==
+// @name         Airbnb – Full Description + Sleeping Arrangements + Review Exporter (Final)
+// @namespace    http://tampermonkey.net/
+// @version      3.0
+// @description  Inline full description, rebuild sleeping arrangements, and export reviews cleanly
+// @match        https://www.airbnb.com/rooms/*
+// @grant        none
+// ==/UserScript==
+
+(function() {
+    'use strict';
+
+    // ----------------- UTIL: waitFor -----------------
+    function waitFor(selector, callback) {
+        const el = document.querySelector(selector);
+        if (el) {
+            callback(el);
+            return;
+        }
+        const observer = new MutationObserver(() => {
+            const el2 = document.querySelector(selector);
+            if (el2) {
+                observer.disconnect();
+                callback(el2);
+            }
+        });
+        observer.observe(document.body, { childList: true, subtree: true });
+    }
+
+    // ----------------- PART 1: FULL DESCRIPTION -----------------
+    function clickShowMore() {
+        const btn = [...document.querySelectorAll("button")]
+            .find(b => b.innerText.trim().toLowerCase() === "show more");
+
+        if (!btn) return;
+        btn.click();
+        waitForFullModal();
+    }
+
+    function waitForFullModal() {
+        const modalSelector =
+            "div.cz692az.atm_c8_exct8b.atm_g3_1tcgj5g.atm_w4_1hnarqo.atm_gq_1itn57d.dir.dir-ltr";
+
+        waitFor(modalSelector, modalDiv => {
+            const fullHTML = modalDiv.innerHTML;
+
+            const closeBtn = document.querySelector("button[aria-label='Close']");
+            if (closeBtn) closeBtn.click();
+
+            injectDescriptionIntoMainPage(fullHTML);
+        });
+    }
+
+    function injectDescriptionIntoMainPage(fullHTML) {
+        const truncatedSelector =
+            "div[data-section-id='DESCRIPTION_DEFAULT'] div[style*='-webkit-line-clamp']";
+
+        const truncatedDiv = document.querySelector(truncatedSelector);
+        if (!truncatedDiv) return;
+
+        truncatedDiv.innerHTML = fullHTML;
+
+        truncatedDiv.style.display = "block";
+        truncatedDiv.style.webkitLineClamp = "unset";
+        truncatedDiv.style.maxHeight = "none";
+        truncatedDiv.style.overflow = "visible";
+        truncatedDiv.style.textOverflow = "unset";
+
+        let parent = truncatedDiv.parentElement;
+        while (parent && parent !== document.body) {
+            parent.style.overflow = "visible";
+            parent.style.maxHeight = "none";
+            parent.style.height = "auto";
+            parent = parent.parentElement;
+        }
+
+        document.body.style.overflow = "auto";
+    }
+
+    // ----------------- PART 2: SLEEPING ARRANGEMENTS VIA JSON INTERCEPT -----------------
+    let sleepingArrangementsData = null;
+    let sleepingArrangementsRendered = false;
+
+    function deepFindSleepingArrangements(obj) {
+        if (!obj || typeof obj !== 'object') return null;
+
+        if (Array.isArray(obj)) {
+            for (const item of obj) {
+                const found = deepFindSleepingArrangements(item);
+                if (found) return found;
+            }
+            return null;
+        }
+
+        if (Object.prototype.hasOwnProperty.call(obj, 'sleepingArrangements') &&
+            Array.isArray(obj.sleepingArrangements) &&
+            obj.sleepingArrangements.length > 0) {
+            return obj.sleepingArrangements;
+        }
+
+        for (const key of Object.keys(obj)) {
+            const val = obj[key];
+            const found = deepFindSleepingArrangements(val);
+            if (found) return found;
+        }
+
+        return null;
+    }
+
+    function handleJSONResponse(json) {
+        if (sleepingArrangementsData) return;
+
+        const found = deepFindSleepingArrangements(json);
+        if (found) {
+            sleepingArrangementsData = found;
+            renderSleepingArrangementsIfReady();
+        }
+    }
+
+    function renderSleepingArrangementsIfReady() {
+        if (!sleepingArrangementsData || sleepingArrangementsRendered) return;
+
+        const container = document.querySelector("div._6htn2u");
+        if (!container) return;
+
+        sleepingArrangementsRendered = true;
+
+        const wrapper = document.createElement("div");
+        wrapper.style.display = "flex";
+        wrapper.style.flexDirection = "column";
+        wrapper.style.gap = "20px";
+        wrapper.style.marginTop = "20px";
+
+        sleepingArrangementsData.forEach(item => {
+            const div = document.createElement("div");
+            div.style.padding = "16px";
+            div.style.border = "1px solid #ddd";
+            div.style.borderRadius = "12px";
+            div.style.background = "white";
+
+            const title = item.title || item.roomName || "Room";
+            const subtitle = item.subtitle || item.bedsDescription || "";
+
+            div.innerHTML = `
+                <div style="font-size: 18px; font-weight: 600; margin-bottom: 4px;">
+                    ${title}
+                </div>
+                <div style="font-size: 16px; opacity: 0.8;">
+                    ${subtitle}
+                </div>
+            `;
+
+            wrapper.appendChild(div);
+        });
+
+        container.innerHTML = "";
+        container.appendChild(wrapper);
+
+        let parent = container;
+        while (parent && parent !== document.body) {
+            parent.style.overflow = "visible";
+            parent.style.height = "auto";
+            parent.style.maxHeight = "none";
+            parent = parent.parentElement;
+        }
+    }
+
+    // ---- Intercept fetch ----
+    const origFetch = window.fetch;
+    window.fetch = function(...args) {
+        return origFetch.apply(this, args).then(res => {
+            try {
+                const clone = res.clone();
+                clone.text().then(text => {
+                    try {
+                        if (!text || text[0] !== '{' && text[0] !== '[') return;
+                        const json = JSON.parse(text);
+                        handleJSONResponse(json);
+                    } catch (e) {}
+                });
+            } catch (e) {}
+            return res;
+        });
+    };
+
+    // ---- Intercept XHR ----
+    const origOpen = XMLHttpRequest.prototype.open;
+    const origSend = XMLHttpRequest.prototype.send;
+
+    XMLHttpRequest.prototype.open = function(method, url, async, user, password) {
+        this._url = url;
+        return origOpen.apply(this, arguments);
+    };
+
+    XMLHttpRequest.prototype.send = function(body) {
+        this.addEventListener('load', function() {
+            try {
+                const text = this.responseText;
+                if (!text || text[0] !== '{' && text[0] !== '[') return;
+                const json = JSON.parse(text);
+                handleJSONResponse(json);
+            } catch (e) {}
+        });
+        return origSend.apply(this, arguments);
+    };
+
+    // ----------------- PART 3: EXPORT REVIEWS -----------------
+
+    function addReviewExportButton() {
+        if (document.getElementById("airbnb-review-export-btn")) return;
+
+        const btn = document.createElement("button");
+        btn.id = "airbnb-review-export-btn";
+        btn.textContent = "Export Reviews";
+        btn.style.position = "fixed";
+        btn.style.top = "80px";
+        btn.style.right = "20px";
+        btn.style.zIndex = "999999";
+        btn.style.padding = "10px 14px";
+        btn.style.background = "#ff385c";
+        btn.style.color = "white";
+        btn.style.border = "none";
+        btn.style.borderRadius = "6px";
+        btn.style.cursor = "pointer";
+        btn.style.fontSize = "14px";
+        btn.style.boxShadow = "0 2px 6px rgba(0,0,0,0.3)";
+
+        btn.onclick = exportReviews;
+
+        document.body.appendChild(btn);
+    }
+
+    function exportReviews() {
+        const panel = document.querySelector("div[data-testid='pdp-reviews-modal-scrollable-panel']");
+        if (!panel) {
+            alert("Open the reviews modal and scroll through all reviews first.");
+            return;
+        }
+
+        const clone = panel.cloneNode(true);
+
+        clone.querySelectorAll("svg").forEach(svg => svg.remove());
+
+        clone.querySelectorAll("img").forEach(img => {
+            let src = img.getAttribute("src");
+            if (src && src.startsWith("/")) {
+                img.src = window.location.origin + src;
+            }
+        });
+
+        // REMOVE ", ·" separators
+        clone.querySelectorAll("*").forEach(node => {
+            if (node.childNodes) {
+                node.childNodes.forEach(child => {
+                    if (child.nodeType === 3) {
+                        child.textContent = child.textContent.replace(/,\s*·/g, "").trim();
+                    }
+                });
+            }
+        });
+
+        const html = clone.innerHTML;
+
+        const popup = window.open("", "_blank", "width=900,height=1000,scrollbars=yes");
+
+        popup.document.write(`
+            <html>
+            <head>
+                <title>Airbnb Reviews Export</title>
+                <style>
+                    body {
+                        font-family: Arial, sans-serif;
+                        padding: 20px;
+                        background: #f5f5f5;
+                    }
+                    img {
+                        max-width: 300px;
+                        border-radius: 8px;
+                        margin-top: 10px;
+                        display: block;
+                    }
+                </style>
+            </head>
+            <body>
+                <h2>Airbnb Reviews Export</h2>
+                <div id="reviews">${html}</div>
+
+                <script>
+                    setTimeout(() => { window.print(); }, 800);
+                </script>
+            </body>
+            </html>
+        `);
+
+        popup.document.close();
+    }
+
+    const reviewObserver = new MutationObserver(() => {
+        const panel = document.querySelector("div[data-testid='pdp-reviews-modal-scrollable-panel']");
+        if (panel) addReviewExportButton();
+    });
+
+    reviewObserver.observe(document.body, { childList: true, subtree: true });
+
+    // ----------------- INIT -----------------
+    window.addEventListener("load", () => {
+        setTimeout(clickShowMore, 1500);
+
+        waitFor("div._6htn2u", () => {
+            renderSleepingArrangementsIfReady();
+        });
+
+        let tries = 0;
+        const interval = setInterval(() => {
+            if (sleepingArrangementsRendered) {
+                clearInterval(interval);
+                return;
+            }
+            renderSleepingArrangementsIfReady();
+            if (++tries > 20) clearInterval(interval);
+        }, 1000);
+    });
+
+})();
