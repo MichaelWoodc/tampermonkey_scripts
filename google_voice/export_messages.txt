@@ -1,17 +1,14 @@
 // ==UserScript==
-// @name         Google Voice – Conversation Exporter (Real Names + Images)
+// @name         Google Voice – Accurate Speaker Export (Manual Trigger)
 // @namespace    https://michael-tools
-// @version      2.4
-// @description  Extracts messages + images + real names, opens in popup for printing/PDF
+// @version      4.0
+// @description  Correct speaker detection using hidden accessibility text
 // @match        https://voice.google.com/*
 // @grant        GM_addStyle
 // ==/UserScript==
 
 (function () {
     'use strict';
-
-    // --- YOUR NAME HERE ---
-    const YOUR_NAME = "Michael";
 
     // --- Add button ---
     const btn = document.createElement("button");
@@ -48,66 +45,42 @@
         }
 
         let transcript = "";
-        let detectedName = ""; // Their name
 
         items.forEach(item => {
-
-            // --- Extract visible bubble text ---
-            const bubble = item.querySelector(".subject-content-container gv-annotation.content, .subject-content-container .content");
+            // Visible bubble text
+            const bubble = item.querySelector(".subject-content-container .content");
             const text = bubble ? bubble.innerText.trim() : "";
 
-            // --- Extract images ---
-            let imagesHTML = "";
-            const imgs = item.querySelectorAll("img.image");
-
-            imgs.forEach(img => {
-                let src = img.getAttribute("src");
-                if (src.startsWith("/")) src = window.location.origin + src;
-
-                imagesHTML += `
-                    <div class="img-wrapper">
-                        <img src="${src}" style="max-width: 300px; margin-top: 10px; border-radius: 6px;">
-                    </div>
-                `;
-            });
-
-            // --- Extract timestamp + speaker ---
+            // Hidden block contains the true speaker + timestamp
             const hidden = item.querySelector(".cdk-visually-hidden");
+            let speaker = "Them";
             let timestamp = "";
-            let speaker = "";
 
             if (hidden) {
                 const hiddenText = hidden.innerText;
 
-                // Detect THEIR name
-                const match = hiddenText.match(/Message from (.*?),/i);
-                if (match && match[1] !== "you" && !detectedName) {
-                    detectedName = match[1].trim();
-                }
-
-                // Timestamp extraction
-                const matchTS = hiddenText.match(/\b(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday).*M\./);
-                if (matchTS) timestamp = matchTS[0];
-
-                // Speaker detection
+                // Detect speaker
                 if (/Message from you/i.test(hiddenText)) {
-                    speaker = YOUR_NAME;
+                    speaker = "You";
                 } else {
-                    speaker = detectedName || "Them";
+                    speaker = "Them";
                 }
+
+                // Extract timestamp
+                const match = hiddenText.match(/\b(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday).*M\./);
+                if (match) timestamp = match[0];
             }
 
             transcript += `
-                <div class="msg ${speaker === YOUR_NAME ? "you" : "them"}">
+                <div class="msg ${speaker === "You" ? "you" : "them"}">
                     <div class="speaker">${speaker}</div>
                     <div class="text">${text.replace(/\n/g, "<br>")}</div>
-                    ${imagesHTML}
                     <div class="timestamp">${timestamp}</div>
                 </div>
             `;
         });
 
-        // --- Open popup ---
+        // Open popup
         const popup = window.open("", "_blank", "width=900,height=1000,scrollbars=yes");
 
         popup.document.write(`
@@ -119,11 +92,6 @@
                         font-family: Arial, sans-serif;
                         padding: 20px;
                         background: #f5f5f5;
-                    }
-                    .contactName {
-                        font-size: 28px;
-                        font-weight: bold;
-                        margin-bottom: 20px;
                     }
                     .msg {
                         margin: 20px 0;
@@ -153,15 +121,11 @@
                 </style>
             </head>
             <body>
-
-                <div class="contactName">${detectedName}</div>
-
+                <h2>Conversation Export</h2>
                 ${transcript}
-
                 <script>
-                    setTimeout(() => { window.print(); }, 800);
+                    setTimeout(() => { window.print(); }, 600);
                 </script>
-
             </body>
             </html>
         `);
