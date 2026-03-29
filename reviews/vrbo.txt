@@ -1,0 +1,134 @@
+// ==UserScript==
+// @name         VRBO Review Modal Auto Loader + Exporter
+// @namespace    http://tampermonkey.net/
+// @version      1.0
+// @description  Detect VRBO review modal dynamically, auto-load all reviews, export clean page
+// @match        https://www.vrbo.com/*
+// @grant        none
+// ==/UserScript==
+
+(function() {
+    'use strict';
+
+    let modalNode = null;
+    let reviewsContainer = null;
+    let alreadyInitialized = false;
+
+    /****************************************
+     * RECURSIVELY CLICK "MORE REVIEWS"
+     ****************************************/
+    async function loadAllReviews() {
+        console.log("VRBO: Starting recursive review loading...");
+
+        let tries = 0;
+
+        while (tries < 50) {
+            const btn = modalNode.querySelector('#load-more-reviews, button[data-stid="reviews-show-more"]');
+
+            if (!btn || btn.disabled || btn.style.display === "none") {
+                console.log("VRBO: No more 'More reviews' button.");
+                break;
+            }
+
+            console.log("VRBO: Clicking 'More reviews'...");
+            btn.click();
+
+            await new Promise(r => setTimeout(r, 1500));
+            tries++;
+        }
+
+        console.log("VRBO: All reviews loaded.");
+    }
+
+    /****************************************
+     * CREATE FLOATING EXPORT BUTTON
+     ****************************************/
+    function createFloatingButton() {
+        if (document.getElementById("vrbo-export-btn")) return;
+
+        const btn = document.createElement("button");
+        btn.id = "vrbo-export-btn";
+        btn.innerText = "Pop Out Reviews";
+        btn.style.position = "fixed";
+        btn.style.bottom = "20px";
+        btn.style.right = "20px";
+        btn.style.zIndex = "999999";
+        btn.style.padding = "12px 18px";
+        btn.style.background = "#0077cc";
+        btn.style.color = "white";
+        btn.style.border = "none";
+        btn.style.borderRadius = "6px";
+        btn.style.cursor = "pointer";
+        btn.style.fontSize = "16px";
+        btn.style.boxShadow = "0 4px 10px rgba(0,0,0,0.3)";
+
+        btn.onclick = exportReviews;
+
+        document.body.appendChild(btn);
+    }
+
+    /****************************************
+     * EXPORT REVIEWS TO CLEAN PAGE
+     ****************************************/
+    function exportReviews() {
+        if (!reviewsContainer) {
+            alert("Reviews container not found.");
+            return;
+        }
+
+        const html = `
+            <html>
+            <head>
+                <title>VRBO Reviews Export</title>
+                <style>
+                    body { font-family: Arial, sans-serif; padding: 20px; }
+                    h1 { margin-bottom: 20px; }
+                </style>
+            </head>
+            <body>
+                <h1>VRBO Reviews</h1>
+                ${reviewsContainer.outerHTML}
+            </body>
+            </html>
+        `;
+
+        const newWin = window.open("", "_blank");
+        newWin.document.write(html);
+        newWin.document.close();
+    }
+
+    /****************************************
+     * MUTATION OBSERVER — THE REAL FIX
+     ****************************************/
+    const observer = new MutationObserver(() => {
+        if (alreadyInitialized) return;
+
+        // Detect modal by content
+        const possibleModals = [...document.querySelectorAll("div, section, article")]
+            .filter(el =>
+                el.innerText?.toLowerCase().includes("reviews") ||
+                el.querySelector?.('[data-stid="reviews-container"]')
+            );
+
+        if (possibleModals.length === 0) return;
+
+        // Find the one that actually contains the reviews container
+        for (const modal of possibleModals) {
+            const container = modal.querySelector('[data-stid="reviews-container"]');
+            if (container) {
+                modalNode = modal;
+                reviewsContainer = container;
+                alreadyInitialized = true;
+
+                console.log("VRBO: Reviews modal detected:", modalNode);
+
+                loadAllReviews();
+                createFloatingButton();
+                return;
+            }
+        }
+    });
+
+    observer.observe(document.body, { childList: true, subtree: true });
+
+})();
