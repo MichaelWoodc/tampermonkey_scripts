@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         Folio Assignment Cleaner (Link-Based)
+// @name         Folio Assignment Cleaner (Toggle UI)
 // @namespace    http://tampermonkey.net/
-// @version      1.1
-// @description  Show only assignments that have clickable links (open assignments)
+// @version      1.3
+// @description  Filter assignments with toggle controls
 // @match        https://*/d2l/*
 // @grant        none
 // ==/UserScript==
@@ -10,23 +10,71 @@
 (function() {
     'use strict';
 
+    let hideNoLink = true;
+    let hideSubmitted = true;
+
     function cleanTable() {
         const rows = document.querySelectorAll("tr");
 
         rows.forEach(row => {
-            // Look for a clickable link inside the first <th>
             const th = row.querySelector("th");
             if (!th) return;
 
-            const hasLink = th.querySelector("a");
+            const hasLink = !!th.querySelector("a");
+            const text = row.innerText.toLowerCase();
+            const isSubmitted = text.includes("submission");
 
-            // If no link → hide the row
-            if (!hasLink) {
-                row.style.display = "none";
-            }
+            let hide = false;
+
+            if (hideNoLink && !hasLink) hide = true;
+            if (hideSubmitted && isSubmitted) hide = true;
+
+            row.style.display = hide ? "none" : "";
         });
     }
 
-    // Run after DOM loads
-    setTimeout(cleanTable, 500);
+    function createUI() {
+        const box = document.createElement("div");
+        box.style.position = "fixed";
+        box.style.top = "20px";
+        box.style.right = "20px";
+        box.style.zIndex = "9999";
+        box.style.background = "white";
+        box.style.border = "1px solid #ccc";
+        box.style.padding = "10px";
+        box.style.borderRadius = "8px";
+        box.style.boxShadow = "0 2px 8px rgba(0,0,0,0.2)";
+        box.style.fontSize = "14px";
+
+        box.innerHTML = `
+            <strong>Assignment Filter</strong><br>
+            <label>
+                <input type="checkbox" id="toggleLink" checked>
+                Hide rows without links
+            </label><br>
+            <label>
+                <input type="checkbox" id="toggleSubmitted" checked>
+                Hide submitted
+            </label>
+        `;
+
+        document.body.appendChild(box);
+
+        document.getElementById("toggleLink").addEventListener("change", (e) => {
+            hideNoLink = e.target.checked;
+            cleanTable();
+        });
+
+        document.getElementById("toggleSubmitted").addEventListener("change", (e) => {
+            hideSubmitted = e.target.checked;
+            cleanTable();
+        });
+    }
+
+    // Initialize
+    setTimeout(() => {
+        createUI();
+        cleanTable();
+    }, 500);
+
 })();
