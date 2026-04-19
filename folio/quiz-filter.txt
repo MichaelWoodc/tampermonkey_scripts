@@ -1,0 +1,65 @@
+// ==UserScript==
+// @name         Quiz Cleaner (0 Attempts Only)
+// @namespace    http://tampermonkey.net/
+// @version      1.0
+// @description  Show only quizzes with 0 attempts (e.g., "0 /")
+// @match        https://*/d2l/lms/quizzing/user/quizzes_list.d2l*
+// @grant        none
+// ==/UserScript==
+
+(function() {
+    'use strict';
+
+    let showOnlyZero = true;
+
+    function cleanTable() {
+        const rows = document.querySelectorAll("tr");
+
+        rows.forEach(row => {
+            const text = row.innerText.toLowerCase();
+            const hasZero = text.includes("0 /");
+
+            if (showOnlyZero && !hasZero) {
+                row.style.display = "none";
+            } else {
+                row.style.display = "";
+            }
+        });
+    }
+
+    function createUI() {
+        const box = document.createElement("div");
+        box.style.position = "fixed";
+        box.style.top = "20px";
+        box.style.right = "20px";
+        box.style.zIndex = "9999";
+        box.style.background = "white";
+        box.style.border = "1px solid #ccc";
+        box.style.padding = "10px";
+        box.style.borderRadius = "8px";
+        box.style.boxShadow = "0 2px 8px rgba(0,0,0,0.2)";
+        box.style.fontSize = "14px";
+
+        box.innerHTML = `
+            <strong>Quiz Filter</strong><br>
+            <label>
+                <input type="checkbox" id="toggleZero" checked>
+                Show only unattempted (0 /)
+            </label>
+        `;
+
+        document.body.appendChild(box);
+
+        document.getElementById("toggleZero").addEventListener("change", (e) => {
+            showOnlyZero = e.target.checked;
+            cleanTable();
+        });
+    }
+
+    // Run after slight delay (Brightspace loads dynamically)
+    setTimeout(() => {
+        createUI();
+        cleanTable();
+    }, 700);
+
+})();
