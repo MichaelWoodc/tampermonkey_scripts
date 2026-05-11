@@ -1,0 +1,77 @@
+// ==UserScript==
+// @name         PowerSchool Focused Table Q4
+// @namespace    http://tampermonkey.net/
+// @version      1.0
+// @description  Build a clean table with only Exp, Course, Q4, Absences, Tardies
+// @match        https://*.powerschool.com/guardian/home.html
+// @run-at       document-end
+// ==/UserScript==
+
+(function() {
+    'use strict';
+
+    function buildCleanTable() {
+        const rows = document.querySelectorAll('tr.center[id^="ccid_"]');
+        if (!rows.length) return;
+
+        // Create new table
+        const newTable = document.createElement('table');
+        newTable.style.width = "100%";
+        newTable.style.borderCollapse = "collapse";
+        newTable.style.marginTop = "20px";
+
+        // Header row
+        const header = document.createElement('tr');
+        ["Exp", "Course", "Q4", "Absences", "Tardies"].forEach(text => {
+            const th = document.createElement('th');
+            th.innerText = text;
+            th.style.border = "1px solid #ccc";
+            th.style.padding = "6px";
+            header.appendChild(th);
+        });
+        newTable.appendChild(header);
+
+        // Process each PowerSchool row
+        rows.forEach(row => {
+            const cells = Array.from(row.querySelectorAll('td'));
+
+            const exp = cells[0]?.innerHTML || "";
+
+            const courseCell = cells.find(td =>
+                td.classList.contains("table-element-text-align-start")
+            );
+            const course = courseCell?.innerHTML || "";
+
+            // Q4 is always the 6th grade cell after course
+            const courseIndex = cells.indexOf(courseCell);
+            const q4 = cells[courseIndex + 6]?.innerHTML || "";
+
+            const absences = cells[cells.length - 2]?.innerHTML || "";
+            const tardies  = cells[cells.length - 1]?.innerHTML || "";
+
+            // Build new row
+            const newRow = document.createElement('tr');
+            [exp, course, q4, absences, tardies].forEach(val => {
+                const td = document.createElement('td');
+                td.innerHTML = val;
+                td.style.border = "1px solid #ccc";
+                td.style.padding = "6px";
+                newRow.appendChild(td);
+            });
+
+            newTable.appendChild(newRow);
+        });
+
+        // Replace the original table
+        const oldTable = document.querySelector("table");
+        if (oldTable) {
+            oldTable.replaceWith(newTable);
+        }
+    }
+
+    // PowerSchool loads dynamically
+    const observer = new MutationObserver(buildCleanTable);
+    observer.observe(document.body, { childList: true, subtree: true });
+
+    setTimeout(buildCleanTable, 1200);
+})();
