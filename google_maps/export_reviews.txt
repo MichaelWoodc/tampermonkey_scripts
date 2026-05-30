@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         Google Maps Review Exporter (v1.0 Manual Scroll Mode)
+// @name         Google Maps Review Exporter (v2.0 – Stars + DOM Clone + Expand More)
 // @namespace    http://tampermonkey.net/
-// @version      1.0
-// @description  Reliable export: detects review panel, requires manual scroll, includes STOP button
+// @version      2.0
+// @description  Export Google Maps reviews with real stars, images, formatting, and expanded text
 // @match        https://www.google.com/maps/*
 // @grant        none
 // ==/UserScript==
@@ -55,44 +55,107 @@
     }
 
     function detectReviewPanel() {
-        return document.querySelector("div.m6QErb[aria-label*='Reviews'], div.m6QErb.tLjsW");
+        return document.querySelector(
+            "div.m6QErb[aria-label*='Reviews'], div.m6QErb.tLjsW"
+        );
     }
 
-    function extractReviews() {
+    //  Replace Google’s private star glyphs with real Unicode stars
+    function replaceStarsInBlock(block) {
+        const starContainer = block.querySelector("span[aria-label*='star']");
+        if (!starContainer) return;
+
+        const label = starContainer.getAttribute("aria-label"); // e.g. "5 stars"
+        const match = label.match(/(\d+(\.\d+)?)/);
+        if (!match) return;
+
+        const rating = parseFloat(match[1]);
+
+        const full = Math.floor(rating);
+        const half = rating % 1 >= 0.5 ? 1 : 0;
+        const empty = 5 - full - half;
+
+        const stars =
+            "★".repeat(full) +
+            (half ? "½" : "") +
+            "☆".repeat(empty);
+
+        starContainer.innerHTML = `<span style="font-size:16px;">${stars}</span>`;
+    }
+
+    //  Auto-expand ALL "More" buttons
+    async function expandAllMoreButtons() {
+        let buttons = Array.from(document.querySelectorAll("button[aria-label='See more'], button.w8nwRe"));
+
+        while (buttons.length > 0 && !stopFlag) {
+            for (const btn of buttons) {
+                btn.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+                btn.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+                btn.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+                await sleep(200);
+            }
+
+            await sleep(500);
+
+            buttons = Array.from(document.querySelectorAll("button[aria-label='See more'], button.w8nwRe"));
+        }
+    }
+
+    async function extractReviewNodes() {
         const blocks = document.querySelectorAll(".jftiEf");
-        return Array.from(blocks).map(b => b.innerHTML);
+        const clones = [];
+
+        for (const block of blocks) {
+            replaceStarsInBlock(block); //  Fix stars BEFORE cloning
+
+            const clone = block.cloneNode(true);
+
+            clone.querySelectorAll("img").forEach(img => {
+                if (img.dataset.src) img.src = img.dataset.src;
+                if (img.getAttribute("src") === "") img.src = img.dataset.src || "";
+            });
+
+            clones.push(clone);
+        }
+
+        return clones;
     }
 
-    function cleanTitle(raw) {
-        return raw.replace(" – Google Maps", "").trim();
-    }
-
-    function openPopup(reviews) {
-        const pageTitle = cleanTitle(document.title || "Google Maps Reviews");
+    async function openPopupWithNodes(nodes) {
+        const pageTitle = document.title.replace(" – Google Maps", "").trim();
         const exportTitle = pageTitle + " – Reviews Export";
 
         const win = window.open("", "_blank");
+
         win.document.write(`
             <html>
             <head>
                 <title>${exportTitle}</title>
                 <style>
-                    body { font-family: Arial; padding: 20px; }
+                    body { font-family: Arial, sans-serif; padding: 20px; }
                     .review { border-bottom: 1px solid #ccc; padding: 15px 0; }
+                    img { max-width: 100%; }
                 </style>
             </head>
             <body>
                 <h1>${exportTitle}</h1>
+                <div id="reviews"></div>
+            </body>
+            </html>
         `);
 
-        reviews.forEach(r => {
-            win.document.write(`<div class="review">${r}</div>`);
-        });
-
-        win.document.write("</body></html>");
         win.document.close();
 
-        setTimeout(() => win.print(), 600);
+        const container = win.document.getElementById("reviews");
+
+        nodes.forEach(node => {
+            const wrapper = win.document.createElement("div");
+            wrapper.className = "review";
+            wrapper.appendChild(node);
+            container.appendChild(wrapper);
+        });
+
+        setTimeout(() => win.print(), 800);
     }
 
     function addExportButton() {
@@ -122,33 +185,33 @@
 
             if (!panel) {
                 hideStop();
-                alert("Click the Reviews tab first, then scroll all the way down.");
+                alert("Click the Reviews tab first, then scroll ALL the way down.");
                 return;
             }
 
-            // Check if user has scrolled
             if (panel.scrollTop + panel.clientHeight + 50 < panel.scrollHeight) {
                 hideStop();
                 alert("Scroll ALL the way down until no more reviews load, then click Export again.");
                 return;
             }
 
-            // User has scrolled fully → export
-            const reviews = extractReviews();
+            //  Expand all "More" buttons BEFORE exporting
+            await expandAllMoreButtons();
+
+            const nodes = await extractReviewNodes();
             hideStop();
 
-            if (reviews.length === 0) {
+            if (nodes.length === 0) {
                 alert("No reviews found.");
                 return;
             }
 
-            openPopup(reviews);
+            openPopupWithNodes(nodes);
         };
 
         document.body.appendChild(btn);
     }
 
-    // Watch for review UI
     const observer = new MutationObserver(() => {
         const contribTab = document.querySelector("div.Gpq6kf.NlVald");
         const placeBtn = document.querySelector("button[jsaction*='pane.rating.moreReviews']");
