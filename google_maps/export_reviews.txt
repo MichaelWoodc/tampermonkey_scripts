@@ -1,0 +1,164 @@
+// ==UserScript==
+// @name         Google Maps Review Exporter (v1.0 Manual Scroll Mode)
+// @namespace    http://tampermonkey.net/
+// @version      1.0
+// @description  Reliable export: detects review panel, requires manual scroll, includes STOP button
+// @match        https://www.google.com/maps/*
+// @grant        none
+// ==/UserScript==
+
+(function() {
+    'use strict';
+
+    let stopFlag = false;
+
+    function sleep(ms) {
+        return new Promise(resolve => setTimeout(resolve, ms));
+    }
+
+    function addStopButton() {
+        if (document.getElementById("gm-stop-btn")) return;
+
+        const stop = document.createElement("button");
+        stop.id = "gm-stop-btn";
+        stop.textContent = "STOP";
+        stop.style.position = "fixed";
+        stop.style.top = "70px";
+        stop.style.right = "20px";
+        stop.style.zIndex = "999999";
+        stop.style.padding = "10px 16px";
+        stop.style.background = "#d93025";
+        stop.style.color = "#fff";
+        stop.style.border = "none";
+        stop.style.borderRadius = "6px";
+        stop.style.fontSize = "14px";
+        stop.style.cursor = "pointer";
+        stop.style.display = "none";
+
+        stop.onclick = () => {
+            stopFlag = true;
+            stop.style.display = "none";
+            alert("Stopped.");
+        };
+
+        document.body.appendChild(stop);
+    }
+
+    function showStop() {
+        const stop = document.getElementById("gm-stop-btn");
+        if (stop) stop.style.display = "block";
+    }
+
+    function hideStop() {
+        const stop = document.getElementById("gm-stop-btn");
+        if (stop) stop.style.display = "none";
+    }
+
+    function detectReviewPanel() {
+        return document.querySelector("div.m6QErb[aria-label*='Reviews'], div.m6QErb.tLjsW");
+    }
+
+    function extractReviews() {
+        const blocks = document.querySelectorAll(".jftiEf");
+        return Array.from(blocks).map(b => b.innerHTML);
+    }
+
+    function cleanTitle(raw) {
+        return raw.replace(" – Google Maps", "").trim();
+    }
+
+    function openPopup(reviews) {
+        const pageTitle = cleanTitle(document.title || "Google Maps Reviews");
+        const exportTitle = pageTitle + " – Reviews Export";
+
+        const win = window.open("", "_blank");
+        win.document.write(`
+            <html>
+            <head>
+                <title>${exportTitle}</title>
+                <style>
+                    body { font-family: Arial; padding: 20px; }
+                    .review { border-bottom: 1px solid #ccc; padding: 15px 0; }
+                </style>
+            </head>
+            <body>
+                <h1>${exportTitle}</h1>
+        `);
+
+        reviews.forEach(r => {
+            win.document.write(`<div class="review">${r}</div>`);
+        });
+
+        win.document.write("</body></html>");
+        win.document.close();
+
+        setTimeout(() => win.print(), 600);
+    }
+
+    function addExportButton() {
+        if (document.getElementById("gm-export-btn")) return;
+
+        const btn = document.createElement("button");
+        btn.id = "gm-export-btn";
+        btn.textContent = "Export Reviews";
+        btn.style.position = "fixed";
+        btn.style.top = "20px";
+        btn.style.right = "20px";
+        btn.style.zIndex = "999999";
+        btn.style.padding = "12px 18px";
+        btn.style.background = "#1a73e8";
+        btn.style.color = "#fff";
+        btn.style.border = "none";
+        btn.style.borderRadius = "6px";
+        btn.style.fontSize = "16px";
+        btn.style.cursor = "pointer";
+        btn.style.boxShadow = "0 2px 6px rgba(0,0,0,0.3)";
+
+        btn.onclick = async () => {
+            stopFlag = false;
+            showStop();
+
+            const panel = detectReviewPanel();
+
+            if (!panel) {
+                hideStop();
+                alert("Click the Reviews tab first, then scroll all the way down.");
+                return;
+            }
+
+            // Check if user has scrolled
+            if (panel.scrollTop + panel.clientHeight + 50 < panel.scrollHeight) {
+                hideStop();
+                alert("Scroll ALL the way down until no more reviews load, then click Export again.");
+                return;
+            }
+
+            // User has scrolled fully → export
+            const reviews = extractReviews();
+            hideStop();
+
+            if (reviews.length === 0) {
+                alert("No reviews found.");
+                return;
+            }
+
+            openPopup(reviews);
+        };
+
+        document.body.appendChild(btn);
+    }
+
+    // Watch for review UI
+    const observer = new MutationObserver(() => {
+        const contribTab = document.querySelector("div.Gpq6kf.NlVald");
+        const placeBtn = document.querySelector("button[jsaction*='pane.rating.moreReviews']");
+
+        if (contribTab || placeBtn) {
+            addExportButton();
+            addStopButton();
+        }
+    });
+
+    observer.observe(document.body, { childList: true, subtree: true });
+
+})();
