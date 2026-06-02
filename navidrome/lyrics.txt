@@ -1,22 +1,23 @@
 // ==UserScript==
-// @name         Navidrome Lyric Accessibility Booster (v13)
+// @name         Navidrome Lyric Customizer
 // @namespace    http://tampermonkey.net/
-// @version      13.0
-// @description  Bottom-centered lyrics, viewport-based wrap width, tight drag hitbox, draggable/minimizable panel, forced lyrics, no clipping, force-center toggle, bottom margin variable
-// @match        https://navidrome.org/*
+// @version      2.1
+// @description  Bottom-centered lyrics, viewport-based wrap width, draggable/minimizable panel, forced lyrics, no clipping, force-center toggle
+// @match        https://navidrome.michaelwoodcock.duckdns.org/app/
 // @grant        none
 // ==/UserScript==
+
 
 (function() {
     'use strict';
 
     let settings = {
-        fontSize: 32,
-        wrapWidth: 90,// percent of viewport width (vw)
+        fontSize: 62,
+        wrapWidth: 90,
         textColor: "#ff0000",
-        bgColor: "transparent",
-        forceCenter: true,// default ON
-        bottomMargin: 20//  NEW: extra margin above bottom
+        bgColor: "#00000080",
+        forceCenter: true,
+        bottomMargin: 20
     };
 
     // --- CREATE CONTROL PANEL ---
@@ -65,7 +66,7 @@
             <br><br>
 
             Background Color:<br>
-            <input id="bc" type="color" value="#00000000" style="width:100%;">
+            <input id="bc" type="color" value="#000000" style="width:100%;">
         </div>
     `;
 
@@ -103,7 +104,6 @@
         const lyric = document.querySelector(".music-player-lyric.react-draggable");
         if (!lyric) return;
 
-        // Create wrapper if missing
         if (!lyric.querySelector(".inner-lyric-text")) {
             const inner = document.createElement("div");
             inner.className = "inner-lyric-text";
@@ -117,7 +117,6 @@
 
         const inner = lyric.querySelector(".inner-lyric-text");
 
-        // OUTER BOX (full wrap width)
         lyric.style.position = "fixed";
         lyric.style.boxSizing = "border-box";
         lyric.style.width = settings.wrapWidth + "vw";
@@ -125,11 +124,8 @@
         lyric.style.whiteSpace = "normal";
         lyric.style.overflow = "visible";
         lyric.style.height = "auto";
-
-        //  Outer box should NOT receive clicks
         lyric.style.pointerEvents = "none";
 
-        // INNER BOX (tight to text)
         inner.style.display = "inline-block";
         inner.style.width = "auto";
         inner.style.maxWidth = "100%";
@@ -141,15 +137,12 @@
         inner.style.padding = "10px";
         inner.style.borderRadius = "6px";
         inner.style.lineHeight = "1.4";
-
-        //  Inner box receives clicks
         inner.style.pointerEvents = "auto";
 
-        //  FORCE CENTER with bottom margin
         if (settings.forceCenter) {
             lyric.style.left = "50%";
             lyric.style.transform = "translateX(-50%)";
-            lyric.style.bottom = (20 + settings.bottomMargin) + "px"; // ⭐ NEW
+            lyric.style.bottom = (20 + settings.bottomMargin) + "px";
             lyric.style.top = "auto";
         }
     }
@@ -232,7 +225,6 @@
         applyStyles();
     });
 
-    // Initial run
     ensureLyricsOn();
     applyStyles();
 })();
