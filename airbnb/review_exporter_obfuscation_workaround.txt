@@ -1,0 +1,135 @@
+// ==UserScript==
+// @name         Airbnb - Combined Description Injector + Flawless Export
+// @namespace    http://tampermonkey.net/
+// @version      10.0
+// @description  Injects full description, keeps stars/pictures intact, removes all stray commas and gaps.
+// @match        https://www.airbnb.com/rooms/*
+// @grant        none
+// ==/UserScript==
+
+(function() {
+    'use strict';
+
+    // ----------------- PART 1: DESCRIPTION INJECTOR -----------------
+    const modalObserver = new MutationObserver((mutations) => {
+        const modal = document.querySelector("div[role='dialog']");
+        if (modal) {
+            const descSection = document.querySelector("div[data-section-id='DESCRIPTION_DEFAULT']");
+            const isDescModal = modal.innerText.includes("About this space");
+
+            if (descSection && isDescModal && !descSection.querySelector(".injected-full-description")) {
+                const fullHTML = modal.innerHTML;
+                const closeBtn = modal.querySelector("button[aria-label='Close']");
+                if (closeBtn) closeBtn.click();
+
+                const originalText = descSection.querySelector("div[style*='-webkit-line-clamp']");
+                if (originalText) {
+                    originalText.style.display = "none";
+                }
+
+                const displayDiv = document.createElement("div");
+                displayDiv.className = "injected-full-description";
+                displayDiv.innerHTML = fullHTML;
+                displayDiv.style.margin = "20px 0";
+
+                descSection.appendChild(displayDiv);
+            }
+        }
+    });
+    modalObserver.observe(document.body, { childList: true, subtree: true });
+
+    // ----------------- PART 2: REVIEW EXPORT WITH AUTO-EXPAND -----------------
+    setInterval(() => {
+        if (document.getElementById("airbnb-review-export-btn")) return;
+
+        const panel = document.querySelector("div[data-testid='pdp-reviews-modal-scrollable-panel']");
+        if (!panel) return;
+
+        const btn = document.createElement("button");
+        btn.id = "airbnb-review-export-btn";
+        btn.textContent = "Export Reviews (Expanded)";
+        btn.style.cssText = "position:fixed; top:80px; right:20px; z-index:999999; padding:10px 14px; background:#ff385c; color:white; border-radius:6px; cursor:pointer; font-weight:bold;";
+
+        btn.onclick = () => {
+            const reviewPanel = document.querySelector("div[data-testid='pdp-reviews-modal-scrollable-panel']");
+            const allButtons = reviewPanel.querySelectorAll("button");
+
+            allButtons.forEach(b => {
+                if (b.innerText.trim().toLowerCase() === "show more") {
+                    b.click();
+                }
+            });
+
+            setTimeout(() => {
+                const reviews = Array.from(reviewPanel.querySelectorAll('[data-review-id]'));
+                const popup = window.open("", "_blank");
+
+                // --- SURGICAL CLEANUP FUNCTION ---
+                const cleanContent = (html) => {
+                    // 1. Remove buttons, dates, and obvious metadata text strings
+                    let cleaned = html
+                        .replace(/<button[\s\S]*?<\/button>/g, '')
+                        .replace(/·/g, '')
+                        .replace(/\d+\s*(weeks|months|years|days)?\s*ago/gi, '')
+                        .replace(/(Group trip|Stayed with kids|Business trip|Couple|Solo trip|February|January|March|April|May|June|July|August|September|October|November|December|202\d)/gi, '');
+
+                    let tempDiv = document.createElement('div');
+                    tempDiv.innerHTML = cleaned;
+
+                    // 2. Erase text nodes that are ONLY commas and whitespace (Leaves stars/SVGs completely alone!)
+                    const walk = document.createTreeWalker(tempDiv, NodeFilter.SHOW_TEXT, null, false);
+                    let node;
+                    let textNodesToRemove = [];
+                    while (node = walk.nextNode()) {
+                        let txt = node.nodeValue;
+                        // If we strip out commas and spaces and nothing is left, it's a junk node.
+                        if (txt.replace(/,/g, '').trim() === '') {
+                            textNodesToRemove.push(node);
+                        }
+                    }
+                    textNodesToRemove.forEach(n => n.remove());
+
+                    // 3. Collapse empty structure boxes to fix the "tons of extra lines"
+                    // We go in reverse (bottom-up) so we don't accidentally miss nested empty boxes
+                    let elements = Array.from(tempDiv.querySelectorAll('div, span, p')).reverse();
+                    elements.forEach(el => {
+                        // Keep it if it has text, OR if it contains an image/svg
+                        if (el.textContent.trim() === '' && el.querySelectorAll('svg, img').length === 0) {
+                            el.remove();
+                        }
+                    });
+
+                    // 4. Ensure no massive multi-line breaks remain
+                    return tempDiv.innerHTML.replace(/(<br\s*\/?>\s*){2,}/gi, '<br>');
+                };
+
+                popup.document.write(`
+                    <html>
+                    <head>
+                        <style>
+                            body { font-family: sans-serif; line-height: 1.6; padding: 40px; color: #333; }
+                            .review-set { margin-bottom: 40px; border-bottom: 2px solid #ddd; padding-bottom: 20px; }
+                            span[role='img'] { display: inline-flex !important; flex-direction: row !important; gap: 2px; }
+                            svg { display: inline-block !important; width: 16px; height: 16px; }
+                            h2 { color: #ff385c; }
+                            hr { border: 0; border-top: 1px solid #eee; margin: 20px 0; }
+                        </style>
+                    </head>
+                    <body>
+                        <h2>Airbnb Reviews Export</h2>
+                        ${reviews.map(rev => `
+                            <div class="review-set">
+                                ${cleanContent(rev.innerHTML)}
+                            </div>
+                        `).join('')}
+                        <script>setTimeout(() => { window.print(); }, 1000);</script>
+                    </body>
+                    </html>
+                `);
+                popup.document.close();
+            }, 1500);
+        };
+
+        document.body.appendChild(btn);
+    }, 3000);
+})();
