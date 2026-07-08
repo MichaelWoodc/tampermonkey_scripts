@@ -1,0 +1,331 @@
+// ==UserScript==
+// @name         Lucky Savannah Universal Crosshair Address Finder
+// @namespace    http://tampermonkey.net/
+// @version      2026-07-07
+// @description  Intercepts map telemetry initialization directly from the page layout context, performs a 5-point crosshair math scan on click, renders visual red dots over targeted coordinates, and prints raw center lat/lng.
+// @author       You
+// @match        https://www.luckysavannah.com/vacation-rentals/*
+// @grant        GM_xmlhttpRequest
+// @grant        unsafeWindow
+// @run-at       document-start
+// ==/UserScript==
+
+(function() {
+    'use strict';
+
+    // ==========================================
+    // CONFIGURATION VARIABLES
+    // ==========================================
+    const OFFSET_PX = 20; // Set the crosshair offset distance in pixels
+    const DOT_SIZE = 6;   // Diameter of the red overlay dots in pixels
+    // ==========================================
+
+    const uw = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;
+    let customPopup = null;
+    let lastPopupTime = 0;
+    let lastClickTime = 0; // Guard against rapid duplicate click event fires
+    let visualDotsContainer = null; // Container for our visual markers
+
+    // Dynamic telemetry container initialized cleanly as nulls
+    let mapCenter = null;
+    let mapZoom = 15;
+
+    // --- STRATEGY 0: INTERCEPT INITIALIZATION ARGUMENTS ---
+    if (uw.initMap) {
+        const originalInitMap = uw.initMap;
+        uw.initMap = function(...args) {
+            try {
+                if (uw._accommodationData && uw._accommodationData.latitude) {
+                    mapCenter = {
+                        lat: parseFloat(uw._accommodationData.latitude),
+                        lng: parseFloat(uw._accommodationData.longitude)
+                    };
+                    console.log("[MapFix] Telemetry intercepted from page dataset context:", mapCenter);
+                }
+            } catch (e) {}
+            return originalInitMap.apply(this, args);
+        };
+    }
+
+    function createPopupCard() {
+        if (customPopup) return customPopup;
+        const card = document.createElement('div');
+        card.id = 'map-address-finder-popup';
+        card.style.cssText = `
+            position: absolute; bottom: 60px; left: 50%; transform: translateX(-50%);
+            background: #2c3e50; color: #ffffff; padding: 12px 18px; border-radius: 8px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.4); font-family: sans-serif;
+            font-size: 14px; font-weight: bold; z-index: 999999; pointer-events: none;
+            text-align: center; border: 1px solid #1a252f; display: none;
+        `;
+        const container = document.getElementById('MainContainer_MapPanel');
+        if (container) container.appendChild(card);
+        customPopup = card;
+        return card;
+    }
+
+    function showPopupMessage(text) {
+        const popup = createPopupCard();
+        if (popup) {
+            popup.style.display = 'block';
+            popup.textContent = text;
+        }
+    }
+
+    // Dynamic Visual Dots Layer Engine
+    function renderVisualCrosshairDots(targets, mapPanel) {
+        if (visualDotsContainer) {
+            visualDotsContainer.remove();
+        }
+
+        visualDotsContainer = document.createElement('div');
+        visualDotsContainer.id = 'crosshair-dots-overlay';
+        visualDotsContainer.style.cssText = `
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            pointer-events: none; z-index: 9999;
+        `;
+
+        targets.forEach(target => {
+            const dot = document.createElement('div');
+            dot.style.cssText = `
+                position: absolute;
+                left: ${target.x - (DOT_SIZE / 2)}px;
+                top: ${target.y - (DOT_SIZE / 2)}px;
+                width: ${DOT_SIZE}px;
+                height: ${DOT_SIZE}px;
+                background-color: #ff2a2a;
+                border: 1px solid #ffffff;
+                border-radius: 50%;
+                box-shadow: 0 0 4px rgba(0,0,0,0.6);
+            `;
+            visualDotsContainer.appendChild(dot);
+        });
+
+        mapPanel.appendChild(visualDotsContainer);
+    }
+
+    // --- STRATEGY A: Existing Google Markers ---
+    const mapObserver = new MutationObserver((mutations) => {
+        for (let mutation of mutations) {
+            for (let node of mutation.addedNodes) {
+                if (node.nodeType !== Node.ELEMENT_NODE) continue;
+                if (node.classList.contains('gm-style-iw-c') || node.querySelector('.gm-style-iw') || node.innerHTML.includes('gm-style-iw')) {
+                    lastPopupTime = Date.now();
+                    setTimeout(() => {
+                        const contentContainer = node.querySelector('.gm-style-iw-d') || node;
+                        if (contentContainer) {
+                            const textLines = Array.from(contentContainer.querySelectorAll('div, p, span'))
+                                .map(el => el.textContent.trim())
+                                .filter(text => text.length > 0 && !text.includes('View on Google Maps'));
+                            const uniqueLines = [...new Set(textLines)];
+                            if (uniqueLines.length > 0) {
+                                const matchedAddr = uniqueLines.join(', ');
+                                console.log(`%c[MAP POPUP] ${matchedAddr}`, "color: #ff9f43; font-weight: bold;");
+                                showPopupMessage(`📍 ${matchedAddr}`);
+                            }
+                        }
+                    }, 50);
+                    return;
+                }
+            }
+        }
+    });
+
+    // --- STRATEGY B: Web Mercator Geometry Math Engine ---
+    function lngToX(lng, zoom) {
+        return (lng + 180) / 360 * Math.pow(2, zoom) * 256;
+    }
+
+    function latToY(lat, zoom) {
+        return (1 - Math.log(Math.tan(lat * Math.PI / 180) + 1 / Math.cos(lat * Math.PI / 180)) / Math.PI) / 2 * Math.pow(2, zoom) * 256;
+    }
+
+    function xToLng(x, zoom) {
+        return x / (256 * Math.pow(2, zoom)) * 360 - 180;
+    }
+
+    function yToLat(y, zoom) {
+        const n = Math.PI - 2 * Math.PI * y / (256 * Math.pow(2, zoom));
+        return 180 / Math.PI * Math.atan(0.5 * (Math.exp(n) - Math.exp(-n)));
+    }
+
+    function reverseGeocode(lat, lng, prefix = "📍 ") {
+        GM_xmlhttpRequest({
+            method: "GET",
+            url: `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lng}`,
+            headers: { "User-Agent": "Tampermonkey-Universal-Math-Bypass" },
+            onload: (res) => {
+                try {
+                    const data = JSON.parse(res.responseText);
+                    if (data && data.display_name) {
+                        const cleanAddress = data.display_name.split(',').slice(0, 3).join(',').trim();
+                        console.log(`%c[CONSOLE ADDRESS] ${prefix}${cleanAddress}`, "color: #2ecc71; font-weight: bold; font-size: 12px;");
+                        showPopupMessage(`${prefix}${cleanAddress}`);
+                    } else {
+                        console.log(`%c[CONSOLE ADDRESS] ${prefix}No structural street address recorded here.`, "color: #e74c3c;");
+                    }
+                } catch(err) {
+                    showPopupMessage("Failed to map locations.");
+                }
+            }
+        });
+    }
+
+    function updateMapState(mapPanel) {
+        if (uw._accommodationData && uw._accommodationData.latitude && parseFloat(uw._accommodationData.latitude) !== 0) {
+            mapCenter = {
+                lat: parseFloat(uw._accommodationData.latitude),
+                lng: parseFloat(uw._accommodationData.longitude)
+            };
+            return true;
+        }
+
+        const staticLink = mapPanel.querySelector('a[href*="maps/api/staticmap"], a[href*="google.com/maps"]');
+        if (staticLink) {
+            const urlMatch = staticLink.href.match(/ll=([-\d.]+),([-\d.]+)/) || staticLink.href.match(/center=([-\d.]+),([-\d.]+)/);
+            const zoomMatch = staticLink.href.match(/z=([\d]+)/) || staticLink.href.match(/zoom=([\d]+)/);
+            if (urlMatch) mapCenter = { lat: parseFloat(urlMatch[1]), lng: parseFloat(urlMatch[2]) };
+            if (zoomMatch) mapZoom = parseInt(zoomMatch[1]);
+            return true;
+        }
+        return mapCenter !== null;
+    }
+
+    function calculateLatLngFromPixels(clickX, clickY, mapPanel) {
+        const rect = mapPanel.getBoundingClientRect();
+        const centerX = rect.width / 2;
+        const centerY = rect.height / 2;
+
+        const centerPixelX = lngToX(mapCenter.lng, mapZoom);
+        const centerPixelY = latToY(mapCenter.lat, mapZoom);
+
+        const targetPixelX = centerPixelX + (clickX - centerX);
+        const targetPixelY = centerPixelY + (clickY - centerY);
+
+        return {
+            lat: yToLat(targetPixelY, mapZoom),
+            lng: xToLng(targetPixelX, mapZoom)
+        };
+    }
+
+    function handleManualMapClick(e, mapPanel) {
+        const now = Date.now();
+        if (now - lastPopupTime < 500 || now - lastClickTime < 500) return;
+
+        if (!updateMapState(mapPanel)) {
+            console.log("[MapFix] Awaiting spatial data sync properties...");
+            return;
+        }
+
+        lastClickTime = now;
+
+        const rect = mapPanel.getBoundingClientRect();
+        const baseClickX = e.clientX - rect.left;
+        const baseClickY = e.clientY - rect.top;
+
+        const targets = [
+            { label: "Center Target", x: baseClickX, y: baseClickY, isCenter: true },
+            { label: `Top Target (-${OFFSET_PX}px)`, x: baseClickX, y: baseClickY - OFFSET_PX, isCenter: false },
+            { label: `Bottom Target (+${OFFSET_PX}px)`, x: baseClickX, y: baseClickY + OFFSET_PX, isCenter: false },
+            { label: `Left Target (-${OFFSET_PX}px)`, x: baseClickX - OFFSET_PX, y: baseClickY, isCenter: false },
+            { label: `Right Target (+${OFFSET_PX}px)`, x: baseClickX + OFFSET_PX, y: baseClickY, isCenter: false }
+        ];
+
+        renderVisualCrosshairDots(targets, mapPanel);
+
+        showPopupMessage("Resolving 5-point crosshair matrix...");
+        console.log(`%c[Crosshair Scan] Initialized around pointer click point: (${Math.round(baseClickX)}, ${Math.round(baseClickY)})`, "color: #3498db; font-weight: bold;");
+
+        targets.forEach((target, index) => {
+            setTimeout(() => {
+                const coords = calculateLatLngFromPixels(target.x, target.y, mapPanel);
+                // Append the raw coordinate values solely to the Center Target log line
+                const finalPrefix = target.isCenter
+                    ? `${target.label} [Raw: ${coords.lat.toFixed(6)}, ${coords.lng.toFixed(6)}]: `
+                    : `${target.label}: `;
+                reverseGeocode(coords.lat, coords.lng, finalPrefix);
+            }, index * 300);
+        });
+    }
+
+    // --- STRATEGY C: True Post-Paint Execution Safe Auto Clicker ---
+    function autoClickMainMarker(mapPanel) {
+        let attempts = 0;
+        const maxAttempts = 40;
+
+        const searchInterval = setInterval(() => {
+            attempts++;
+            const markerImg = mapPanel.querySelector('img[src*="transparent.png"]');
+            const markerDiv = markerImg ? markerImg.closest('div[style*="cursor: pointer"]') : null;
+            const dataReady = updateMapState(mapPanel);
+
+            if (markerDiv && dataReady) {
+                clearInterval(searchInterval);
+                console.log("[MapFix] Structural alignment matched. Triggering clean runtime click workflow...");
+
+                const rect = markerDiv.getBoundingClientRect();
+                const targetX = rect.left + (rect.width / 2);
+                const targetY = rect.bottom;
+
+                const targetWindow = markerDiv.ownerDocument.defaultView || window;
+
+                try {
+                    const simulatedClick = new targetWindow.MouseEvent('click', {
+                        clientX: targetX,
+                        clientY: targetY,
+                        bubbles: true,
+                        cancelable: true,
+                        view: targetWindow
+                    });
+                    markerDiv.dispatchEvent(simulatedClick);
+                } catch (fallbackError) {
+                    const legacyClick = markerDiv.ownerDocument.createEvent('MouseEvents');
+                    legacyClick.initMouseEvent('click', true, true, targetWindow, 1, 0, 0, targetX, targetY, false, false, false, false, 0, null);
+                    markerDiv.dispatchEvent(legacyClick);
+                }
+            } else if (attempts >= maxAttempts) {
+                clearInterval(searchInterval);
+                console.log("[MapFix] Elements ready timeout. Reverting to baseline extraction routing parameters...");
+                if (updateMapState(mapPanel)) {
+                    reverseGeocode(mapCenter.lat, mapCenter.lng, `Estimated Center [Raw: ${mapCenter.lat.toFixed(6)}, ${mapCenter.lng.toFixed(6)}]: `);
+                }
+            }
+        }, 500);
+    }
+
+    function init() {
+        const mapPanel = document.getElementById('MainContainer_MapPanel');
+        if (!mapPanel) return false;
+
+        if (mapPanel.style.position !== 'absolute' && mapPanel.style.position !== 'relative') {
+            mapPanel.style.position = 'relative';
+        }
+
+        mapObserver.observe(mapPanel, { childList: true, subtree: true });
+
+        mapPanel.addEventListener('click', (e) => {
+            handleManualMapClick(e, mapPanel);
+        }, true);
+
+        if (document.readyState === 'complete') {
+            autoClickMainMarker(mapPanel);
+        } else {
+            window.addEventListener('load', () => {
+                autoClickMainMarker(mapPanel);
+            });
+        }
+
+        console.log("[MapFix] Universal Multi-Property Route Engine fully loaded.");
+        return true;
+    }
+
+    if (!init()) {
+        const observer = new MutationObserver((mutations, obs) => {
+            if (document.getElementById('MainContainer_MapPanel')) {
+                init();
+                obs.disconnect();
+            }
+        });
+        observer.observe(document.body, { childList: true, subtree: true });
+    }
+})();
