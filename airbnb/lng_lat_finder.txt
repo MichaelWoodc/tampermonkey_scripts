@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         Airbnb Lat/Lng Floating Window (Safe Version)
+// @name         Airbnb Lat/Lng + URL Copy + SAGIS Injector
 // @namespace    http://tampermonkey.net/
-// @version      3.0
-// @description  Floating draggable window showing Airbnb listing coordinates without freezing
+// @version      4.0
+// @description  Floating draggable window showing Airbnb listing coordinates, copy button, and SAGIS injection
 // @match        https://www.airbnb.com/*
 // @grant        none
 // ==/UserScript==
@@ -25,7 +25,27 @@
     box.style.fontFamily = "Arial, sans-serif";
     box.style.cursor = "move";
     box.style.boxShadow = "0 0 10px rgba(0,0,0,0.5)";
-    box.innerHTML = "Lat/Lng:<br><b>Waiting for map…</b>";
+    box.innerHTML = `
+        Lat/Lng:<br>
+        <b id="coordsText">Waiting for map…</b><br><br>
+
+        <button id="copyBtn" style="
+            padding:4px 8px;
+            font-size:12px;
+            cursor:pointer;
+            border:none;
+            border-radius:4px;
+            margin-bottom:6px;
+        ">Copy URL + Coords</button><br>
+
+        <button id="sagisBtn" style="
+            padding:4px 8px;
+            font-size:12px;
+            cursor:pointer;
+            border:none;
+            border-radius:4px;
+        ">Open in SAGIS</button>
+    `;
     document.body.appendChild(box);
 
     // Make draggable
@@ -61,11 +81,47 @@
         return { lat, lng };
     }
 
+    // Copy function
+    function copyData() {
+        const coords = document.getElementById("coordsText").innerText;
+        const url = window.location.href;
+
+        const [lat, lng] = coords.split(',').map(v => v.trim());
+
+        const finalText = `${url}, ${lng}, ${lat}`;
+
+        navigator.clipboard.writeText(finalText).then(() => {
+            document.getElementById("copyBtn").innerText = "Copied!";
+            setTimeout(() => {
+                document.getElementById("copyBtn").innerText = "Copy URL + Coords";
+            }, 1200);
+        });
+    }
+
+    // SAGIS injection
+    function openSagis() {
+        const coords = document.getElementById("coordsText").innerText;
+        const [lat, lng] = coords.split(',').map(v => v.trim());
+
+        // SAGIS viewer base URL
+        const sagisBase = "https://www.sagis.org/?page=SAGIS-Viewer#";
+
+        // SAGIS expects: lon,lat (Web Mercator or WGS84 depending on layer)
+        // For now we inject raw WGS84 into a custom param
+        const sagisURL = `${sagisBase}lat=${lat}&lng=${lng}`;
+
+        window.open(sagisURL, "_blank");
+    }
+
+    // Attach button handlers
+    document.getElementById("copyBtn").addEventListener("click", copyData);
+    document.getElementById("sagisBtn").addEventListener("click", openSagis);
+
     // Poll every second (safe)
     setInterval(() => {
         const coords = getCoords();
         if (coords) {
-            box.innerHTML = `Lat/Lng:<br><b>${coords.lat}, ${coords.lng}</b>`;
+            document.getElementById("coordsText").innerText = `${coords.lat}, ${coords.lng}`;
         }
     }, 1000);
 
