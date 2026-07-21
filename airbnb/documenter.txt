@@ -1,14 +1,48 @@
 // ==UserScript==
-// @name         Airbnb - Combined Full Suite (Desc + Sleep + Clean Export)
+// @name         Airbnb - Combined Full Suite (Desc + Sleep + Clean Export + Auto Expand)
 // @namespace    http://tampermonkey.net/
-// @version      4.0
-// @description  Injects full description, renders sleeping arrangements, and exports reviews cleanly.
+// @version      5.0
+// @description  Injects full description, expands sleeping arrangements, auto-expands description, and exports reviews cleanly.
 // @match        https://www.airbnb.com/rooms/*
 // @grant        none
 // ==/UserScript==
 
 (function() {
     'use strict';
+
+    // ----------------- AUTO-EXPAND DESCRIPTION "SHOW MORE" -----------------
+    function autoExpandDescription() {
+        let clicked = false;
+
+        const tryClick = () => {
+            if (clicked) return;
+
+            const btn = [...document.querySelectorAll("button")]
+                .find(b => b.innerText.trim().toLowerCase() === "show more");
+
+            if (btn) {
+                btn.click();
+                clicked = true;
+            }
+        };
+
+        // Try immediately
+        tryClick();
+
+        // Try repeatedly for React re-renders
+        const interval = setInterval(() => {
+            tryClick();
+            if (clicked) clearInterval(interval);
+        }, 500);
+
+        // MutationObserver fallback
+        const mo = new MutationObserver(() => tryClick());
+        mo.observe(document.body, { childList: true, subtree: true });
+    }
+
+    window.addEventListener("load", () => {
+        setTimeout(autoExpandDescription, 1200);
+    });
 
     // ----------------- PART 1: DESCRIPTION INJECTOR -----------------
     const modalObserver = new MutationObserver((mutations) => {
@@ -18,6 +52,12 @@
             const isDescModal = modal.innerText.includes("About this space");
 
             if (descSection && isDescModal && !descSection.querySelector(".injected-full-description")) {
+
+                // Auto-expand inside modal too
+                [...modal.querySelectorAll("button")].forEach(b => {
+                    if (b.innerText.trim().toLowerCase() === "show more") b.click();
+                });
+
                 const fullHTML = modal.innerHTML;
                 const closeBtn = modal.querySelector("button[aria-label='Close']");
                 if (closeBtn) closeBtn.click();
@@ -37,35 +77,29 @@
 
     // ----------------- PART 2: EXPANDED SLEEPING ARRANGEMENTS -----------------
     function renderSleepingArrangementsExpanded() {
-        // Find the main container of the carousel
         const carouselList = document.querySelector("ul.omd1zsm");
         if (!carouselList || document.querySelector(".injected-sleep-grid")) return;
 
-        // Create a new grid container to hold all items
         const gridContainer = document.createElement("div");
         gridContainer.className = "injected-sleep-grid";
-        gridContainer.style.cssText = "display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 20px; margin-top: 20px;";
+        gridContainer.style.cssText =
+            "display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 20px; margin-top: 20px;";
 
-        // Move all <li> items from the carousel into our new grid
         const items = Array.from(carouselList.querySelectorAll("li"));
         items.forEach(item => {
-            // Remove the fixed width styles that keep them in the carousel
             item.style.flex = "none";
             item.style.maxWidth = "100%";
             gridContainer.appendChild(item);
         });
 
-        // Hide the original carousel wrapper and navigation buttons
         const parentSection = document.querySelector("section[aria-roledescription='carousel']");
         if (parentSection) {
-            parentSection.innerHTML = ""; // Clear the carousel
-            parentSection.appendChild(gridContainer); // Add our grid instead
+            parentSection.innerHTML = "";
+            parentSection.appendChild(gridContainer);
         }
     }
 
-    // Run this when the page loads to capture the elements
     window.addEventListener("load", () => {
-        // A small delay to ensure the React-rendered elements exist
         setTimeout(renderSleepingArrangementsExpanded, 2000);
     });
 
@@ -78,31 +112,53 @@
         const btn = document.createElement("button");
         btn.id = "airbnb-review-export-btn";
         btn.textContent = "Export Reviews (Expanded)";
-        btn.style.cssText = "position:fixed; top:80px; right:20px; z-index:999999; padding:10px 14px; background:#ff385c; color:white; border-radius:6px; cursor:pointer; font-weight:bold;";
+        btn.style.cssText =
+            "position:fixed; top:80px; right:20px; z-index:999999; padding:10px 14px; background:#ff385c; color:white; border-radius:6px; cursor:pointer; font-weight:bold;";
 
         btn.onclick = () => {
-            panel.querySelectorAll("button").forEach(b => { if (b.innerText.trim().toLowerCase() === "show more") b.click(); });
+            panel.querySelectorAll("button").forEach(b => {
+                if (b.innerText.trim().toLowerCase() === "show more") b.click();
+            });
 
             setTimeout(() => {
                 const reviews = Array.from(panel.querySelectorAll('[data-review-id]'));
                 const popup = window.open("", "_blank");
 
                 const cleanContent = (html) => {
-                    let cleaned = html.replace(/<button[\s\S]*?<\/button>/g, '').replace(/·/g, '').replace(/\d+\s*(weeks|months|years|days)?\s*ago/gi, '');
+                    let cleaned = html
+                        .replace(/<button[\s\S]*?<\/button>/g, '')
+                        .replace(/·/g, '')
+                        .replace(/\d+\s*(weeks|months|years|days)?\s*ago/gi, '');
+
                     let tempDiv = document.createElement('div');
                     tempDiv.innerHTML = cleaned;
-                    // Remove empty nodes
+
                     const walk = document.createTreeWalker(tempDiv, NodeFilter.SHOW_TEXT, null, false);
                     let node, toRemove = [];
-                    while (node = walk.nextNode()) if (node.nodeValue.replace(/,/g, '').trim() === '') toRemove.push(node);
+                    while (node = walk.nextNode()) {
+                        if (node.nodeValue.replace(/,/g, '').trim() === '') toRemove.push(node);
+                    }
                     toRemove.forEach(n => n.remove());
+
                     return tempDiv.innerHTML.replace(/(<br\s*\/?>\s*){2,}/gi, '<br>');
                 };
 
-                popup.document.write(`<html><body><h2>Airbnb Reviews</h2>${reviews.map(r => `<div style="margin-bottom:20px; border-bottom:1px solid #ccc;">${cleanContent(r.innerHTML)}</div>`).join('')}<script>setTimeout(window.print, 1000);</script></body></html>`);
+                popup.document.write(`
+                    <html>
+                    <body>
+                        <h2>Airbnb Reviews</h2>
+                        ${reviews.map(r =>
+                            `<div style="margin-bottom:20px; border-bottom:1px solid #ccc;">${cleanContent(r.innerHTML)}</div>`
+                        ).join('')}
+                        <script>setTimeout(window.print, 1000);</script>
+                    </body>
+                    </html>
+                `);
                 popup.document.close();
             }, 1500);
         };
+
         document.body.appendChild(btn);
     }, 3000);
+
 })();
