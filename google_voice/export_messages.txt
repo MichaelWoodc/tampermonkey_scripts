@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         Google Voice – Accurate Speaker Export (Manual Trigger)
+// @name       Google Voice – Accurate Speaker Export (Manual Trigger)
 // @namespace    https://michael-tools
-// @version      4.0
-// @description  Correct speaker detection using hidden accessibility text
+// @version      4.2
+// @description  Dynamic speaker labeling with Michael and header contact details
 // @match        https://voice.google.com/*
 // @grant        GM_addStyle
 // ==/UserScript==
@@ -37,33 +37,44 @@
     `);
 
     btn.onclick = () => {
-        const items = document.querySelectorAll("gv-text-message-item");
+        // Extract contact name and phone number dynamically from the thread header
+        const headerTitleEl = document.querySelector('gv-thread-details-header .header-title');
+        const headerPhoneEl = document.querySelector('gv-thread-details-header .secondary-text');
 
-        if (!items.length) {
+        let contactName = headerTitleEl ? headerTitleEl.innerText.trim() : "Them";
+        // Clean up weird unicode spacing around the phone number text
+        let contactPhone = headerPhoneEl ? headerPhoneEl.innerText.trim().replace(/[^\d()\-+ ]/g, '').trim() : "";
+        let otherPartyLabel = contactPhone ? `${contactName} (${contactPhone})` : contactName;
+
+        const bubbles = document.querySelectorAll(".subject-content-container.bubble");
+
+        if (!bubbles.length) {
             alert("No messages detected. Scroll through the conversation first so they render.");
             return;
         }
 
         let transcript = "";
 
-        items.forEach(item => {
-            // Visible bubble text
-            const bubble = item.querySelector(".subject-content-container .content");
-            const text = bubble ? bubble.innerText.trim() : "";
+        bubbles.forEach(bubble => {
+            // Visible text extraction
+            const annotation = bubble.querySelector(".content");
+            const text = annotation ? annotation.innerText.trim() : bubble.innerText.trim();
 
-            // Hidden block contains the true speaker + timestamp
-            const hidden = item.querySelector(".cdk-visually-hidden");
-            let speaker = "Them";
+            // Locate parent row container to check accessibility text and timestamps
+            const row = bubble.closest("li") || bubble.parentElement;
+            const hidden = row ? row.querySelector(".cdk-visually-hidden") : null;
+
+            let speaker = otherPartyLabel;
             let timestamp = "";
 
             if (hidden) {
                 const hiddenText = hidden.innerText;
 
-                // Detect speaker
+                // Detect speaker and apply custom names
                 if (/Message from you/i.test(hiddenText)) {
-                    speaker = "You";
+                    speaker = "Michael";
                 } else {
-                    speaker = "Them";
+                    speaker = otherPartyLabel;
                 }
 
                 // Extract timestamp
@@ -72,7 +83,7 @@
             }
 
             transcript += `
-                <div class="msg ${speaker === "You" ? "you" : "them"}">
+                <div class="msg ${speaker === "Michael" ? "you" : "them"}">
                     <div class="speaker">${speaker}</div>
                     <div class="text">${text.replace(/\n/g, "<br>")}</div>
                     <div class="timestamp">${timestamp}</div>
@@ -86,7 +97,7 @@
         popup.document.write(`
             <html>
             <head>
-                <title>Conversation Export</title>
+                <title>Conversation Export - ${contactName}</title>
                 <style>
                     body {
                         font-family: Arial, sans-serif;
@@ -121,7 +132,7 @@
                 </style>
             </head>
             <body>
-                <h2>Conversation Export</h2>
+                <h2>Conversation Export: Michael &amp; ${contactName}</h2>
                 ${transcript}
                 <script>
                     setTimeout(() => { window.print(); }, 600);
