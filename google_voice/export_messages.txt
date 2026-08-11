@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name       Google Voice – Accurate Speaker Export (Manual Trigger)
+// @name         Google Voice – Accurate Speaker Export (Manual Trigger)
 // @namespace    https://michael-tools
-// @version      4.2
-// @description  Dynamic speaker labeling with Michael and header contact details
+// @version      4.6
+// @description  Dynamic speaker labeling with deduplicated message rows, inline images in exact order, and clean print styling
 // @match        https://voice.google.com/*
 // @grant        GM_addStyle
 // ==/UserScript==
@@ -42,27 +42,29 @@
         const headerPhoneEl = document.querySelector('gv-thread-details-header .secondary-text');
 
         let contactName = headerTitleEl ? headerTitleEl.innerText.trim() : "Them";
-        // Clean up weird unicode spacing around the phone number text
         let contactPhone = headerPhoneEl ? headerPhoneEl.innerText.trim().replace(/[^\d()\-+ ]/g, '').trim() : "";
         let otherPartyLabel = contactPhone ? `${contactName} (${contactPhone})` : contactName;
 
-        const bubbles = document.querySelectorAll(".subject-content-container.bubble");
+        // Find all candidate message rows containing accessibility data and message content/attachments
+        let candidateRows = Array.from(document.querySelectorAll('li')).filter(li => {
+            return li.querySelector('.cdk-visually-hidden') && 
+                   (li.querySelector('.subject-content-container.bubble') || li.querySelector('gv-image-attachment'));
+        });
 
-        if (!bubbles.length) {
+        // Deduplicate nested <li> elements to ensure we only process top-level parent message rows
+        const messageRows = candidateRows.filter(li => {
+            return !candidateRows.some(otherLi => otherLi !== li && otherLi.contains(li));
+        });
+
+        if (!messageRows.length) {
             alert("No messages detected. Scroll through the conversation first so they render.");
             return;
         }
 
         let transcript = "";
 
-        bubbles.forEach(bubble => {
-            // Visible text extraction
-            const annotation = bubble.querySelector(".content");
-            const text = annotation ? annotation.innerText.trim() : bubble.innerText.trim();
-
-            // Locate parent row container to check accessibility text and timestamps
-            const row = bubble.closest("li") || bubble.parentElement;
-            const hidden = row ? row.querySelector(".cdk-visually-hidden") : null;
+        messageRows.forEach(row => {
+            const hidden = row.querySelector(".cdk-visually-hidden");
 
             let speaker = otherPartyLabel;
             let timestamp = "";
@@ -70,7 +72,7 @@
             if (hidden) {
                 const hiddenText = hidden.innerText;
 
-                // Detect speaker and apply custom names
+                // Detect speaker
                 if (/Message from you/i.test(hiddenText)) {
                     speaker = "Michael";
                 } else {
@@ -82,10 +84,46 @@
                 if (match) timestamp = match[0];
             }
 
+            // Query all text and image elements within this unified message row in exact document order
+            const candidates = row.querySelectorAll('.content, .subject-content-container.bubble, gv-image-attachment img, img.image');
+            
+            // Filter out container .bubble if its inner .content is already captured to prevent duplicate text
+            const inlineElements = Array.from(candidates).filter(el => {
+                if (el.classList.contains('bubble') && el.querySelector('.content')) {
+                    return false;
+                }
+                return true;
+            });
+
+            let messageBodyHtml = "";
+
+            if (inlineElements.length > 0) {
+                inlineElements.forEach(el => {
+                    if (el.matches('.content, .subject-content-container.bubble')) {
+                        let txt = el.innerText.trim();
+                        if (txt) {
+                            messageBodyHtml += `<div class="text-part">${txt.replace(/\n/g, "<br>")}</div>`;
+                        }
+                    } else if (el.matches('gv-image-attachment img, img.image')) {
+                        if (el.src) {
+                            messageBodyHtml += `<img src="${el.src}" alt="Attached image">`;
+                        }
+                    }
+                });
+            }
+
+            // Fallback if no specific sub-elements matched
+            if (!messageBodyHtml) {
+                let fallbackText = row.innerText.trim();
+                if (fallbackText) {
+                    messageBodyHtml += `<div class="text-part">${fallbackText.replace(/\n/g, "<br>")}</div>`;
+                }
+            }
+
             transcript += `
                 <div class="msg ${speaker === "Michael" ? "you" : "them"}">
                     <div class="speaker">${speaker}</div>
-                    <div class="text">${text.replace(/\n/g, "<br>")}</div>
+                    <div class="body-content">${messageBodyHtml}</div>
                     <div class="timestamp">${timestamp}</div>
                 </div>
             `;
@@ -104,6 +142,9 @@
                         padding: 20px;
                         background: #f5f5f5;
                     }
+                    h2 {
+                        margin-bottom: 20px;
+                    }
                     .msg {
                         margin: 20px 0;
                         padding: 15px 20px;
@@ -111,6 +152,8 @@
                         max-width: 80%;
                         background: white;
                         box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+                        break-inside: avoid;
+                        page-break-inside: avoid;
                     }
                     .you {
                         margin-left: auto;
@@ -124,10 +167,37 @@
                         font-weight: bold;
                         margin-bottom: 5px;
                     }
+                    .text-part {
+                        word-break: break-word;
+                        margin-bottom: 8px;
+                    }
+                    .text-part:last-child {
+                        margin-bottom: 0;
+                    }
+                    .msg img {
+                        max-width: 100%;
+                        height: auto;
+                        border-radius: 8px;
+                        margin: 8px 0;
+                        display: block;
+                        box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+                    }
                     .timestamp {
                         font-size: 0.8em;
                         color: #666;
                         margin-top: 8px;
+                    }
+                    @media print {
+                        body {
+                            background: white;
+                            padding: 0;
+                        }
+                        .msg {
+                            box-shadow: none;
+                            border: 1px solid #ccc;
+                            break-inside: avoid;
+                            page-break-inside: avoid;
+                        }
                     }
                 </style>
             </head>
